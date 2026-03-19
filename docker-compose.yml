@@ -1,0 +1,76 @@
+services:
+  # Backend API Server
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: backend
+    container_name: notemind-backend
+    restart: unless-stopped
+    ports:
+      - "3001:3001"
+    environment:
+      - NODE_ENV=production
+      - PORT=3001
+      - FRONTEND_URL=${FRONTEND_URL:-https://notemind.tech}
+      - DOMAIN=${DOMAIN:-notemind.tech}
+      - ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-https://notemind.tech,https://www.notemind.tech}
+      - API_DOMAIN=${API_DOMAIN:-https://api.notemind.tech}
+      - JWT_SECRET=${JWT_SECRET}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - QWEN_API_KEY=${QWEN_API_KEY}
+      - QWEN_API_BASE_URL=${QWEN_API_BASE_URL:-https://dashscope-intl.aliyuncs.com/compatible-mode/v1}
+      - QWEN_MODEL=${QWEN_MODEL:-qwen3-max}
+      - TURNSTILE_SECRET=${TURNSTILE_SECRET}
+      - SMTP_HOST=${SMTP_HOST:-}
+      - SMTP_PORT=${SMTP_PORT:-}
+      - SMTP_USER=${SMTP_USER:-}
+      - SMTP_PASS=${SMTP_PASS:-}
+      - SMTP_FROM=${SMTP_FROM:-}
+      - SMTP_FROM_NAME=${SMTP_FROM_NAME:-NoteMind}
+      - SEPAY_API_KEY=${SEPAY_API_KEY:-}
+      - SEPAY_BANK_ACCOUNT=${SEPAY_BANK_ACCOUNT:-}
+      - SEPAY_BANK_NAME=${SEPAY_BANK_NAME:-MB Bank}
+      - SEPAY_ACCOUNT_NAME=${SEPAY_ACCOUNT_NAME:-}
+      - SEPAY_MERCHANT_ID=${SEPAY_MERCHANT_ID:-}
+      - SEPAY_SECRET_KEY=${SEPAY_SECRET_KEY:-}
+      - SEPAY_PG_ENV=${SEPAY_PG_ENV:-production}
+    volumes:
+      - ./server/data:/app/data
+      - ./server/uploads:/app/uploads
+      - ./server/exports:/app/exports
+      - ./server/logs:/app/logs
+    networks:
+      - notemind-network
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:3001/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # Nginx Reverse Proxy
+  nginx:
+    image: nginx:alpine
+    container_name: notemind-nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./deploy/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./certs:/etc/ssl/cloudflare:ro
+    networks:
+      - notemind-network
+    depends_on:
+      - backend
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+
+networks:
+  notemind-network:
+    driver: bridge

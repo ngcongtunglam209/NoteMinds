@@ -1,0 +1,97 @@
+# ========== Dependencies ==========
+node_modules/
+package-lock.json
+yarn.lock
+
+# ========== Build Output ==========
+dist/
+client/dist/
+server/dist/
+build/
+
+# ========== Environment & Config ==========
+.env
+.env.local
+.env.*.local
+server/.env
+server/.env.local
+client/.env
+client/.env.local
+
+# ========== Runtime Data ==========
+# Uploads
+server/uploads/
+server/exports/
+server/public/
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+server/data/
+database.db
+
+# Logs
+*.log
+logs/
+server/logs/
+npm-debug.log*
+yarn-error.log*
+
+# ========== OS & IDE Files ==========
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+.Spotlight-V100
+.Trashes
+
+# Windows
+Thumbs.db
+desktop.ini
+*.exe
+*.lnk
+
+# Linux
+.directory
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*.sublime-project
+*.sublime-workspace
+*.iml
+.classpath
+.c9/
+*.launch
+.settings/
+*.sublime-workspace
+
+# VSCode specific
+.vscode-test/
+.vscode/settings.json
+.vscode/launch.json
+.vscode/extensions.json
+
+# ========== Project Specific ==========
+gen-og.ps1
+*.tmp
+.cache/
+tmp/
+
+# SSL certificates (Cloudflare origin certs)
+certs/
+certbot/
+
+# PM2
+ecosystem.config.cjs.bak
+pids/
+*.pid
+*.pid.lock
+
+# Docker build context
+.docker/
+.dockerignore
