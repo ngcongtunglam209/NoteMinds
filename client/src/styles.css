@@ -102,7 +102,7 @@ a { color: inherit; text-underline-offset: 0.2em; }
   background: var(--paper); /* the red note is written on a clean patch of page, over the ruling */
   font-family: var(--font-pen); font-size: 19.5px; line-height: 1; color: var(--pen); text-decoration: none;
 }
-.due::before { content: ''; position: absolute; inset: 4px 2px 3px 4px; background: url('../assets/plates/due-circle.png') center / 100% 100% no-repeat; }
+.due::before { content: ''; position: absolute; inset: 4px 2px 3px 4px; animation: pen-draw 0.7s cubic-bezier(0.16, 1, 0.3, 1) 0.15s backwards; background: url('../assets/plates/due-circle.png') center / 100% 100% no-repeat; }
 
 .page h2 { margin-top: 12px; font-size: 25px; font-weight: 700; line-height: calc(var(--row) * 2); letter-spacing: -0.01em; }
 
@@ -302,3 +302,8 @@ a { color: inherit; text-underline-offset: 0.2em; }
 /* ── Review ── */
 .review { max-width: 560px; }
 .review .icon-btn { margin-left: -10px; }
+
+/* ── Signature motion: the red pen draws its circle; a finished step fills with ink ── */
+@keyframes pen-draw { from { clip-path: inset(0 100% 0 0); } to { clip-path: inset(0 0 0 0); } }
+.step-mark circle, .step-mark path { transition: fill 0.5s cubic-bezier(0.16, 1, 0.3, 1); }
+@media (prefers-reduced-motion: reduce) { .due::before { animation: none; } .step-mark circle, .step-mark path { transition: none; } }
