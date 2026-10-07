@@ -1,0 +1,40 @@
+{
+  "header.language": "Language",
+  "header.theme": "Theme",
+  "theme.system": "System",
+  "theme.light": "Light",
+  "theme.dark": "Dark",
+
+  "auth.login": "Log in",
+  "auth.register": "Sign up",
+  "auth.logout": "Log out",
+  "auth.registerTitle": "Create an account",
+  "auth.loginOrEmail": "Username or email",
+  "auth.username": "Username",
+  "auth.email": "Email",
+  "auth.password": "Password",
+  "auth.displayName": "Display name (optional)",
+  "auth.processing": "Working...",
+  "auth.loading": "Loading...",
+  "auth.noAccount": "No account yet?",
+  "auth.hasAccount": "Already have an account?",
+
+  "field.login": "Enter your username or email.",
+  "field.username": "Usernames are 3–30 characters: letters, numbers, dots, underscores or hyphens.",
+  "field.email": "That email address isn't valid.",
+  "field.password": "Passwords must be 8 to 128 characters.",
+  "field.displayName": "Display names can be at most 50 characters.",
+
+  "error.invalid_input": "Some details aren't valid. Check the highlighted fields.",
+  "error.captcha_failed": "Security check failed. Please try again.",
+  "error.username_taken": "That username is already taken.",
+  "error.email_taken": "That email is already registered.",
+  "error.invalid_credentials": "Wrong username or password.",
+  "error.unauthorized": "Your session has expired. Please log in again.",
+  "error.rate_limited": "Too many attempts. Please wait a moment and try again.",
+  "error.not_found": "We couldn't find what you were looking for.",
+  "error.internal": "Something went wrong. Please try again later.",
+
+  "library.title": "Library",
+  "doc.title": "Document"
+}

@@ -1,0 +1,40 @@
+{
+  "header.language": "Ngôn ngữ",
+  "header.theme": "Giao diện",
+  "theme.system": "Theo hệ thống",
+  "theme.light": "Sáng",
+  "theme.dark": "Tối",
+
+  "auth.login": "Đăng nhập",
+  "auth.register": "Đăng ký",
+  "auth.logout": "Đăng xuất",
+  "auth.registerTitle": "Tạo tài khoản",
+  "auth.loginOrEmail": "Tên đăng nhập hoặc email",
+  "auth.username": "Tên đăng nhập",
+  "auth.email": "Email",
+  "auth.password": "Mật khẩu",
+  "auth.displayName": "Tên hiển thị (tuỳ chọn)",
+  "auth.processing": "Đang xử lý...",
+  "auth.loading": "Đang tải...",
+  "auth.noAccount": "Chưa có tài khoản?",
+  "auth.hasAccount": "Đã có tài khoản?",
+
+  "field.login": "Vui lòng nhập tên đăng nhập hoặc email.",
+  "field.username": "Tên đăng nhập gồm 3–30 ký tự: chữ không dấu, số, dấu chấm, gạch dưới hoặc gạch ngang.",
+  "field.email": "Email không hợp lệ.",
+  "field.password": "Mật khẩu cần từ 8 đến 128 ký tự.",
+  "field.displayName": "Tên hiển thị tối đa 50 ký tự.",
+
+  "error.invalid_input": "Thông tin chưa hợp lệ, vui lòng kiểm tra các ô được đánh dấu.",
+  "error.captcha_failed": "Xác minh bảo mật không thành công, vui lòng thử lại.",
+  "error.username_taken": "Tên đăng nhập này đã có người dùng.",
+  "error.email_taken": "Email này đã được đăng ký.",
+  "error.invalid_credentials": "Tên đăng nhập hoặc mật khẩu không đúng.",
+  "error.unauthorized": "Phiên đăng nhập đã hết hạn, vui lòng đăng nhập lại.",
+  "error.rate_limited": "Bạn thử quá nhiều lần, vui lòng đợi một lát rồi thử lại.",
+  "error.not_found": "Không tìm thấy nội dung bạn cần.",
+  "error.internal": "Đã xảy ra lỗi, vui lòng thử lại sau.",
+
+  "library.title": "Thư viện",
+  "doc.title": "Tài liệu"
+}
