@@ -1,17 +1,15 @@
-# Keep host artifacts and secrets out of the image (host node_modules would also
-# overwrite the Linux-built native modules on COPY server/ ./)
+# Only package manifests, client/, server/src and shared/ are needed in the build context.
 **/node_modules
 .git
+.claude
+legacy
+certs
+data
+**/data
+client/dist
 .env
 .env.*
-!.env.example
 **/.env
-server/data
-server/uploads
-server/exports
-server/logs
-server/public
-client/dist
-certs
-certbot
+**/.env.*
 *.log
+**/*.test.ts
