@@ -87,5 +87,11 @@
   "study.close": "Đóng",
   "study.chatEmpty": "Hỏi bất cứ điều gì về tài liệu này. Câu trả lời chỉ dựa trên nội dung tài liệu.",
   "study.chatPlaceholder": "Nhập câu hỏi…",
-  "study.send": "Gửi"
+  "study.send": "Gửi",
+  "library.startReview": "Bắt đầu ôn · {n} thẻ",
+  "library.nothingDue": "Hôm nay không có thẻ nào đến hạn. Mở một cuốn vở để học tiếp.",
+  "library.newNotebook": "Vở mới",
+  "library.uploading": "Đang tải lên…",
+  "library.formats": "PDF, DOCX, PPTX, XLSX, TXT, MD, ảnh",
+  "library.empty": "Chưa có cuốn vở nào. Tải tài liệu đầu tiên lên để bắt đầu."
 }

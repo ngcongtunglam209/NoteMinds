@@ -9,11 +9,15 @@ import { useTheme, type ThemePref } from './theme.tsx';
 const StudyFixture = import.meta.env.DEV
   ? lazy(() => import('./dev/StudyFixture.tsx').then((m) => ({ default: m.StudyFixture })))
   : null;
+const LibraryFixture = import.meta.env.DEV
+  ? lazy(() => import('./dev/LibraryFixture.tsx').then((m) => ({ default: m.LibraryFixture })))
+  : null;
 
 export function App() {
   return (
     <Routes>
       {StudyFixture && <Route path="/dev/study" element={<Suspense><StudyFixture /></Suspense>} />}
+      {LibraryFixture && <Route path="/dev/library" element={<Suspense><LibraryFixture /></Suspense>} />}
       <Route element={<WithHeader />}>
         <Route path="/login" element={<LoginPage />} />
         <Route path="/register" element={<RegisterPage />} />

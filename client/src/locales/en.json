@@ -87,5 +87,11 @@
   "study.close": "Close",
   "study.chatEmpty": "Ask anything about this document. Answers come only from its content.",
   "study.chatPlaceholder": "Type a question…",
-  "study.send": "Send"
+  "study.send": "Send",
+  "library.startReview": "Start review · {n} cards",
+  "library.nothingDue": "Nothing is due today. Open a notebook to keep learning.",
+  "library.newNotebook": "New notebook",
+  "library.uploading": "Uploading…",
+  "library.formats": "PDF, DOCX, PPTX, XLSX, TXT, MD, images",
+  "library.empty": "No notebooks yet. Upload your first document to start."
 }
