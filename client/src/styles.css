@@ -14,9 +14,14 @@
   --pen: #e0281f; /* red ballpoint: due counts, review marks, lapses */
 
   --row: 26.6px; /* one ô li row = one line of body text */
+  --ruling:
+    linear-gradient(to bottom, transparent calc(var(--row) - 1px), var(--rule) calc(var(--row) - 1px)),
+    linear-gradient(to bottom, transparent calc(var(--row) / 4 - 1px), var(--rule-faint) calc(var(--row) / 4 - 1px)),
+    linear-gradient(to right, transparent calc(var(--row) - 1px), var(--rule-grid) calc(var(--row) - 1px));
+  --ruling-size: 100% var(--row), 100% calc(var(--row) / 4), var(--row) 100%;
   --gutter: 23px;
   --font-ui: 'Archivo Variable', system-ui, sans-serif;
-  --narrow: 84%; /* Archivo width axis: long reading text is set narrow, like the comp */
+  --narrow: 90%; /* Archivo width axis: long reading text is set narrow, like the comp */
   --font-pen: 'Patrick Hand', cursive;
 
   --label-frame: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='60' height='60' viewBox='0 0 60 60'%3E%3Cg fill='none' stroke='%23120f5a'%3E%3Cpath stroke-width='1.25' d='M9 1H51A8 8 0 0 0 59 9V51A8 8 0 0 0 51 59H9A8 8 0 0 0 1 51V9A8 8 0 0 0 9 1Z'/%3E%3Cpath stroke-width='0.8' d='M10 5H50A5 5 0 0 0 55 10V50A5 5 0 0 0 50 55H10A5 5 0 0 0 5 50V10A5 5 0 0 0 10 5Z'/%3E%3C/g%3E%3C/svg%3E");
@@ -66,7 +71,7 @@ a { color: inherit; text-underline-offset: 0.2em; }
 .steps { display: grid; grid-template-columns: repeat(4, 1fr); margin-top: 9px; border-block: 1px solid var(--rule); }
 .step {
   display: flex; flex-direction: column; align-items: center; gap: 1px;
-  padding: 4px 2px 6px; height: 74px;
+  padding: 4px 2px 6px; min-height: 74px;
   border: 0; background: none; color: var(--ink); font-size: 14.5px; line-height: 1.2; cursor: pointer;
 }
 .step + .step { border-left: 1px solid var(--rule); }
@@ -77,7 +82,7 @@ a { color: inherit; text-underline-offset: 0.2em; }
   background: url('../assets/plates/pen-underline.png') center / 100% 100% no-repeat;
 }
 .step-mark { flex: none; margin-top: 2px; }
-.step-state { display: flex; align-items: center; gap: 5px; }
+.step-state { display: flex; flex-direction: column; align-items: center; gap: 0; }
 .step-status { margin-top: 2px; font-size: 12px; color: var(--ink-soft); }
 
 /* The page: ô li ruling (strong line closes each row, three faint lines inside, faint verticals), red margin */
@@ -85,11 +90,8 @@ a { color: inherit; text-underline-offset: 0.2em; }
   position: relative; flex: 1;
   padding: 0 46px 112px 51px;
   background-color: var(--paper);
-  background-image:
-    linear-gradient(to bottom, transparent calc(var(--row) - 1px), var(--rule) calc(var(--row) - 1px)),
-    linear-gradient(to bottom, transparent calc(var(--row) / 4 - 1px), var(--rule-faint) calc(var(--row) / 4 - 1px)),
-    linear-gradient(to right, transparent calc(var(--row) - 1px), var(--rule-grid) calc(var(--row) - 1px));
-  background-size: 100% var(--row), 100% calc(var(--row) / 4), var(--row) 100%;
+  background-image: var(--ruling);
+  background-size: var(--ruling-size);
   background-position: 0 -7px; /* puts each row's strong line on the text baseline */
 }
 .page::before { /* double red margin rule */
@@ -99,7 +101,6 @@ a { color: inherit; text-underline-offset: 0.2em; }
 
 .due {
   position: relative; display: flex; align-items: center; justify-content: center; width: fit-content; min-width: 150px; height: 51px; margin: 2px -40px 0 auto; padding: 0 18px 2px;
-  background: var(--paper); /* the red note is written on a clean patch of page, over the ruling */
   font-family: var(--font-pen); font-size: 19.5px; line-height: 1; color: var(--pen); text-decoration: none;
 }
 .due::before { content: ''; position: absolute; inset: 4px 2px 3px 4px; animation: pen-draw 0.7s cubic-bezier(0.16, 1, 0.3, 1) 0.15s backwards; background: url('../assets/plates/due-circle.png') center / 100% 100% no-repeat; }
@@ -109,13 +110,17 @@ a { color: inherit; text-underline-offset: 0.2em; }
 .due + h2 { margin-top: -6px; } /* the heading tucks under the red note */
 
 /* Summary prose sits on the ruling: line-height is exactly one row */
-.prose { font-size: 17.7px; font-stretch: var(--narrow); letter-spacing: 0.012em; word-spacing: 0.06em; line-height: var(--row); max-width: 65ch; text-align: justify; hyphens: none; }
+.prose { font-size: 17.7px; font-stretch: var(--narrow); line-height: var(--row); max-width: 65ch; text-wrap: pretty; } /* ragged right: justify opens rivers around unbreakable formulas */
 .prose p, .prose ul, .prose ol { margin-bottom: var(--row); }
 .prose ul, .prose ol { padding-left: 27px; }
 .prose li { margin-bottom: 8px; padding-left: 2px; }
 .prose li::marker { font-size: 0.9em; }
 .prose h3 { font-size: 19px; font-weight: 600; line-height: calc(var(--row) * 1.5); }
-.prose strong { font-weight: 500; text-decoration: underline 2px color-mix(in srgb, var(--ink) 70%, transparent); text-underline-offset: 4px; }
+.prose strong { /* key terms: underlined by hand in violet ink */
+  font-weight: 500; padding-bottom: 0.2em;
+  background: url('../assets/plates/term-underline.png') left 100% / 100% 0.42em no-repeat;
+  box-decoration-break: clone; -webkit-box-decoration-break: clone;
+}
 
 /* Thumb zone: one primary action plus the document chat */
 .thumb {
@@ -220,15 +225,16 @@ a { color: inherit; text-underline-offset: 0.2em; }
 
 /* ── Wider screens: steps become the red-margin column; chat becomes a right column ── */
 @media (min-width: 768px) {
-  .study { display: grid; grid-template-columns: 180px minmax(0, 1fr); grid-template-rows: auto auto 1fr; max-width: 1180px; margin: 0 auto; }
+  .study { display: grid; grid-template-columns: 180px minmax(0, 1fr); grid-template-rows: auto auto 1fr auto; max-width: 960px; margin: 0 auto; }
   .study-top, .label { grid-column: 1 / -1; }
-  .label { max-width: 720px; }
-  .steps { grid-row: 3; grid-template-columns: 1fr; align-content: start; margin-top: 18px; border: 0; border-right: 1px solid var(--rule); }
+  .label { max-width: 560px; }
+  .label h1 { font-size: 22px; }
+  .steps { grid-row: 3; grid-template-columns: 1fr; align-content: start; margin-top: 18px; border: 0; border-right: 1px solid var(--rule); background-image: var(--ruling); background-size: var(--ruling-size); background-position: 0 -7px; }
   .step { flex-direction: row; justify-content: flex-start; gap: 10px; height: auto; min-height: 52px; padding: 8px 16px; text-align: left; }
   .step + .step { border-left: 0; border-top: 1px solid var(--rule-faint); }
-  .step-state { margin-left: auto; }
-  .page { grid-row: 3; margin-top: 18px; padding-right: 48px; padding-bottom: 120px; }
-  .thumb { left: 50%; right: auto; width: min(560px, 100%); transform: translateX(-50%); }
+  .step-state { margin-left: auto; flex-direction: row; gap: 5px; }
+  .page { grid-row: 3; margin-top: 18px; padding-right: 48px; padding-bottom: 32px; }
+  .thumb { position: sticky; bottom: 0; grid-column: 2; grid-row: 4; width: auto; max-width: calc(65ch + 51px); padding-left: 51px; }
 }
 @media (min-width: 1280px) {
   .sheet { inset: 0 0 0 auto; width: 400px; height: auto; border-top: 0; border-left: 1.5px solid var(--ink); border-radius: 0; animation-name: sheet-side; }

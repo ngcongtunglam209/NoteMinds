@@ -11,7 +11,8 @@ import { useT } from './i18n.tsx';
 export function SummaryStep({ summary }: { summary: Summary }) {
   return (
     <div className="prose">
-      <Markdown>{summary.markdown}</Markdown>
+      {/* no-break spaces around operators keep a formula like p² + 2pq + q² = 1 on one line */}
+      <Markdown>{summary.markdown.replace(/ ([=+−×÷<>≤≥]) /g, '\u00a0$1\u00a0')}</Markdown>
     </div>
   );
 }
