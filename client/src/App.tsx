@@ -1,8 +1,10 @@
 import { lazy, Suspense } from 'react';
-import { Link, Navigate, Outlet, Route, Routes, useParams } from 'react-router';
+import { Link, Navigate, Outlet, Route, Routes } from 'react-router';
 import { RequireAuth, useAuth } from './auth.tsx';
 import { LoginPage, RegisterPage } from './AuthPages.tsx';
 import { useLang, useT, type Lang } from './i18n.tsx';
+import { LibraryPage, ReviewPage } from './LibraryPage.tsx';
+import { StudyPage } from './StudyPage.tsx';
 import { useTheme, type ThemePref } from './theme.tsx';
 
 // Dev-only design fixture; the DEV check lets the production build drop it.
@@ -26,14 +28,15 @@ export function App() {
         </Route>
       </Route>
       <Route element={<RequireAuth />}>
-        <Route path="/doc/:id" element={<DocumentPage />} />
+        <Route path="/doc/:id" element={<StudyPage />} />
+        <Route path="/review" element={<ReviewPage />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );
 }
 
-// The study screen draws its own top bar; the other screens keep this placeholder header.
+// The study and review screens draw their own top bar; library and auth share this header.
 function WithHeader() {
   return (
     <>
@@ -52,8 +55,8 @@ function Header() {
   const { user, logout } = useAuth();
 
   return (
-    <header>
-      <Link to="/">NoteMinds</Link>
+    <header className="app-header">
+      <Link to="/" className="brand">NoteMinds</Link>
       <label>
         {t('header.language')}{' '}
         <select value={lang} onChange={(e) => setLang(e.target.value as Lang)}>
@@ -77,16 +80,4 @@ function Header() {
       )}
     </header>
   );
-}
-
-// Placeholders: the real screens come with the document features.
-function LibraryPage() {
-  const t = useT();
-  return <h1>{t('library.title')}</h1>;
-}
-
-function DocumentPage() {
-  const t = useT();
-  const { id } = useParams();
-  return <h1>{t('doc.title')} {id}</h1>;
 }

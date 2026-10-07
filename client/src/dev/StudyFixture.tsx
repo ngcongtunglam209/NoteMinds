@@ -92,7 +92,6 @@ export function StudyFixture() {
         backLabel="Quay lại thư viện"
         onBack={noop}
         moreLabel="Thêm tuỳ chọn"
-        onMore={noop}
       >
         <div hidden={current !== 0}><SummaryStep summary={summary} /></div>
         <div hidden={current !== 1}><MindmapStep mindmap={mindmap} /></div>

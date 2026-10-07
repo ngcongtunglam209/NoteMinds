@@ -93,5 +93,10 @@
   "library.newNotebook": "Vở mới",
   "library.uploading": "Đang tải lên…",
   "library.formats": "PDF, DOCX, PPTX, XLSX, TXT, MD, ảnh",
-  "library.empty": "Chưa có cuốn vở nào. Tải tài liệu đầu tiên lên để bắt đầu."
+  "library.empty": "Chưa có cuốn vở nào. Tải tài liệu đầu tiên lên để bắt đầu.",
+  "study.regenerate": "Tạo lại bước này",
+  "study.delete": "Xoá cuốn vở",
+  "study.deleteConfirm": "Bấm lần nữa để xoá hẳn",
+  "review.title": "Ôn tập hôm nay",
+  "review.done": "Xong rồi! Hôm nay không còn thẻ nào đến hạn."
 }

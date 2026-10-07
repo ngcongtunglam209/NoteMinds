@@ -51,23 +51,27 @@ export function MindmapStep({ mindmap }: { mindmap: Mindmap }) {
 
 const GRADES: SrsGrade[] = ['again', 'hard', 'good', 'easy'];
 
-export function FlashcardStep({ cards, onGrade, active = true }: {
+export function FlashcardStep({ cards, onGrade, active = true, review = false }: {
   cards: Flashcard[];
-  onGrade: (index: number, grade: SrsGrade) => void;
+  onGrade?: (index: number, grade: SrsGrade) => void; // omit to browse the deck without grading
   active?: boolean; // keyboard shortcuts only while this step is on screen
+  review?: boolean; // graded cards leave the list, so stay on the same index instead of advancing
 }) {
   const t = useT();
   const [i, setI] = useState(0);
   const [flipped, setFlipped] = useState(false);
-  const card = cards[i];
+  const at = Math.min(i, Math.max(0, cards.length - 1));
+  const card = cards[at];
 
   const go = (next: number) => {
     setI(Math.max(0, Math.min(cards.length - 1, next)));
     setFlipped(false);
   };
   const grade = (g: SrsGrade) => {
-    onGrade(i, g);
-    if (i < cards.length - 1) go(i + 1);
+    if (!onGrade) return;
+    onGrade(at, g);
+    if (review) setFlipped(false);
+    else if (at < cards.length - 1) go(at + 1);
   };
 
   // Keyboard: Space flips, arrows move, 1–4 grade once flipped. Ignored while typing or in the chat sheet.
@@ -76,8 +80,8 @@ export function FlashcardStep({ cards, onGrade, active = true }: {
     const onKey = (e: KeyboardEvent) => {
       if (e.target instanceof HTMLElement && e.target.closest('input, textarea, [role="dialog"]')) return;
       if (e.key === ' ') { e.preventDefault(); setFlipped((f) => !f); }
-      else if (e.key === 'ArrowRight') go(i + 1);
-      else if (e.key === 'ArrowLeft') go(i - 1);
+      else if (e.key === 'ArrowRight') go(at + 1);
+      else if (e.key === 'ArrowLeft') go(at - 1);
       else if (flipped && ['1', '2', '3', '4'].includes(e.key)) grade(GRADES[Number(e.key) - 1]!);
     };
     window.addEventListener('keydown', onKey);
@@ -88,7 +92,7 @@ export function FlashcardStep({ cards, onGrade, active = true }: {
 
   return (
     <div className="flash">
-      <p className="flash-count" aria-live="polite">{t('study.cardOf').replace('{n}', String(i + 1)).replace('{total}', String(cards.length))}</p>
+      <p className="flash-count" aria-live="polite">{t('study.cardOf').replace('{n}', String(at + 1)).replace('{total}', String(cards.length))}</p>
       <button
         type="button"
         className={`flash-card${flipped ? ' is-flipped' : ''}`}
@@ -98,7 +102,7 @@ export function FlashcardStep({ cards, onGrade, active = true }: {
         <span className="flash-face flash-front">{card.question}</span>
         <span className="flash-face flash-back" aria-hidden={!flipped}>{card.answer}</span>
       </button>
-      {flipped ? (
+      {flipped && onGrade ? (
         <div className="grades" role="group" aria-label={t('study.gradeLabel')}>
           {GRADES.map((g, n) => (
             <button key={g} type="button" className={`grade grade-${g}`} onClick={() => grade(g)}>
@@ -108,7 +112,7 @@ export function FlashcardStep({ cards, onGrade, active = true }: {
           ))}
         </div>
       ) : (
-        <p className="flash-hint">{t('study.flipHint')}</p>
+        !flipped && <p className="flash-hint">{t('study.flipHint')}</p>
       )}
     </div>
   );

@@ -91,7 +91,7 @@ export function LoginPage() {
   if (user) return <Navigate to={returnTo} replace />;
 
   return (
-    <section aria-labelledby="login-title">
+    <section className="auth" aria-labelledby="login-title">
       <h1 id="login-title">{t('auth.login')}</h1>
       <form ref={form.formRef} onSubmit={form.onSubmit}>
         {form.formError}
@@ -144,7 +144,7 @@ export function RegisterPage() {
   if (user) return <Navigate to={returnTo} replace />;
 
   return (
-    <section aria-labelledby="register-title">
+    <section className="auth" aria-labelledby="register-title">
       <h1 id="register-title">{t('auth.registerTitle')}</h1>
       <form ref={form.formRef} onSubmit={form.onSubmit}>
         {form.formError}

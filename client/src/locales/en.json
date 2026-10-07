@@ -93,5 +93,10 @@
   "library.newNotebook": "New notebook",
   "library.uploading": "Uploading…",
   "library.formats": "PDF, DOCX, PPTX, XLSX, TXT, MD, images",
-  "library.empty": "No notebooks yet. Upload your first document to start."
+  "library.empty": "No notebooks yet. Upload your first document to start.",
+  "study.regenerate": "Regenerate this step",
+  "study.delete": "Delete notebook",
+  "study.deleteConfirm": "Tap again to delete for good",
+  "review.title": "Today's review",
+  "review.done": "All done! Nothing else is due today."
 }

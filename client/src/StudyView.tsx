@@ -1,4 +1,4 @@
-import { useRef, type KeyboardEvent, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import { ArrowLeft, ArrowRight, Ellipsis, MessageCircleMore } from 'lucide-react';
 import type { ArtifactStatus } from '../../shared/study-api.ts';
 
@@ -23,12 +23,24 @@ interface Props {
   backLabel: string;
   onBack: () => void;
   moreLabel: string;
-  onMore: () => void;
+  moreMenu?: ReactNode; // contents of the ⋯ menu
 }
 
 /** The study screen in the Vở ô li world. Pure: StudyPage feeds it data. */
 export function StudyView(p: Props) {
   const tabs = useRef<(HTMLButtonElement | null)[]>([]);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  // The ⋯ menu closes on Esc or a click outside it.
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onKey = (e: globalThis.KeyboardEvent) => { if (e.key === 'Escape') setMenuOpen(false); };
+    const onDown = (e: PointerEvent) => { if (!menuRef.current?.contains(e.target as Node)) setMenuOpen(false); };
+    window.addEventListener('keydown', onKey);
+    window.addEventListener('pointerdown', onDown);
+    return () => { window.removeEventListener('keydown', onKey); window.removeEventListener('pointerdown', onDown); };
+  }, [menuOpen]);
 
   // Tablist keyboard model: arrows move between steps, Home/End jump to the ends.
   const onKeyDown = (e: KeyboardEvent) => {
@@ -47,9 +59,12 @@ export function StudyView(p: Props) {
         <button type="button" className="icon-btn" onClick={p.onBack} aria-label={p.backLabel}>
           <ArrowLeft size={24} strokeWidth={1.75} />
         </button>
-        <button type="button" className="icon-btn" onClick={p.onMore} aria-label={p.moreLabel}>
-          <Ellipsis size={24} strokeWidth={2.5} />
-        </button>
+        <div className="menu-anchor" ref={menuRef}>
+          <button type="button" className="icon-btn" onClick={() => setMenuOpen((o) => !o)} aria-label={p.moreLabel} aria-haspopup="menu" aria-expanded={menuOpen}>
+            <Ellipsis size={24} strokeWidth={2.5} />
+          </button>
+          {menuOpen && p.moreMenu}
+        </div>
       </div>
 
       <header className="label">
