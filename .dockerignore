@@ -1,0 +1,15 @@
+# Only package manifests, client/, server/src and shared/ are needed in the build context.
+**/node_modules
+.git
+.claude
+legacy
+certs
+data
+**/data
+client/dist
+.env
+.env.*
+**/.env
+**/.env.*
+*.log
+**/*.test.ts

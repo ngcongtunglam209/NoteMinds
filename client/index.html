@@ -1,51 +1,20 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="vi">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>NoteMinds - AI Tóm Tắt Bài Giảng</title>
-
-    <!-- SEO Meta -->
-    <meta name="description" content="NoteMinds — Ứng dụng AI hỗ trợ học tập: tự động tạo Sơ đồ tư duy, Flashcard và Hỏi đáp từ bài giảng. Powered by Qwen3." />
-    <meta name="keywords" content="NoteMinds, AI, sơ đồ tư duy, flashcard, tóm tắt bài giảng, Qwen3, học tập, mindmap" />
-    <meta name="author" content="TechX" />
-    <meta name="theme-color" content="#e11d48" />
-
-    <!-- Open Graph (Facebook, Zalo, Telegram, iMessage) -->
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>NoteMinds</title>
+    <meta name="description" content="NoteMinds — trợ lý học tập AI: tải bài giảng lên để có tóm tắt, sơ đồ tư duy, flashcard, quiz và hỏi đáp theo tài liệu, rồi ôn tập lại theo thời gian." />
     <meta property="og:type" content="website" />
     <meta property="og:url" content="https://notemind.tech/" />
-    <meta property="og:title" content="NoteMinds — AI Tóm Tắt Bài Giảng" />
-    <meta property="og:description" content="Upload bài giảng, tự động tạo Sơ đồ tư duy, Flashcard và Chat AI với tài liệu. Hỗ trợ PDF, DOCX, PPTX, XLSX và nhiều định dạng khác." />
-    <meta property="og:image" content="https://notemind.tech/og-image.png" />
-    <meta property="og:image:width" content="1200" />
-    <meta property="og:image:height" content="630" />
-    <meta property="og:locale" content="vi_VN" />
     <meta property="og:site_name" content="NoteMinds" />
-
-    <!-- Twitter Card (X) -->
-    <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:title" content="NoteMinds — AI Tóm Tắt Bài Giảng" />
-    <meta name="twitter:description" content="Upload bài giảng, tự động tạo Sơ đồ tư duy, Flashcard và Chat AI với tài liệu." />
-    <meta name="twitter:image" content="https://notemind.tech/og-image.png" />
-
-    <!-- Discord Embed -->
-    <meta name="discord:title" content="NoteMinds — AI Tóm Tắt Bài Giảng" />
-
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Plus+Jakarta+Sans:wght@500;600;700;800&family=Noto+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <meta property="og:title" content="NoteMinds" />
+    <meta property="og:description" content="Tải bài giảng lên để có tóm tắt, sơ đồ tư duy, flashcard, quiz và hỏi đáp theo tài liệu." />
+    <meta property="og:locale" content="vi_VN" />
+    <meta property="og:locale:alternate" content="en_US" />
   </head>
   <body>
     <div id="root"></div>
-    <script src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit" async defer></script>
-    <script type="module" src="/src/main.jsx"></script>
-    <script>
-      if ('serviceWorker' in navigator) {
-        window.addEventListener('load', () => {
-          navigator.serviceWorker.register('/sw.js').catch(() => {});
-        });
-      }
-    </script>
+    <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

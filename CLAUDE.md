@@ -5,86 +5,32 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Commands
 
 ```bash
-# Development
-npm run dev              # Start both client (port 5173) and server (port 3001) concurrently
-npm run dev:client       # Frontend only
-npm run dev:server       # Backend only (watch mode)
+npm install              # Installs all workspaces (client, server)
+npm run dev              # API on :3001 (watch) + Vite on :5173 (proxies /api)
+npm test                 # Server tests (node --test on src/**/*.test.ts)
+npm run typecheck        # tsc --noEmit for server and client
+npm run build            # Client production build -> client/dist
+npm start                # API in production mode
 
-# Production
-npm run build            # Build frontend for production
-npm run start            # Run backend in production mode
-npm run install:all      # Install all workspace dependencies
-
-# Docker
-docker compose up        # Full stack with Nginx
-bash deploy/deploy.sh <domain>  # Automated VPS deployment with Cloudflare certs
+# Deployment (VPS, behind Cloudflare)
+cp .env.example .env     # Fill in secrets; compose reads this file
+bash deploy/deploy.sh <domain>  # Needs certs/origin.pem + certs/origin-key.pem (Cloudflare origin cert)
 ```
-
-No test or lint commands are configured.
 
 ## Architecture
 
-**NoteMinds** is a full-stack AI-powered study assistant — monorepo with `client/` (React SPA) and `server/` (Node.js + Express).
+**NoteMinds** is an AI study assistant (upload a document → summary, mindmap, flashcards, quiz, chat). TypeScript rewrite; npm workspaces:
 
-### Frontend (`client/src/`)
+- **`server/`** — Express 5 on Node 24, TypeScript run natively (type stripping, no build step; imports use `.ts` extensions, erasable syntax only). `src/index.ts` boots, `src/app.ts` wires routers.
+  - `db.ts` — built-in `node:sqlite` (WAL). Numbered SQL files in `src/migrations/` applied in order, tracked by `PRAGMA user_version`. Raw SQL, no ORM.
+  - `auth.ts` — session-cookie auth (random token, hashed in `sessions` table; scrypt passwords), Cloudflare Turnstile, rate limits.
+  - `documents.ts` + `extract.ts` — upload (50MB, in memory), text extraction (PDF, DOCX, PPTX, XLSX, text, OCR via tesseract.js), daily quotas.
+  - `ai/` — Qwen/DashScope client (`llm.ts`, the one seam tests fake), prompt building, generators, SM-2 scheduler (`srs.ts`).
+  - Env: see `server/.env.example` (dev) / root `.env.example` (production).
+- **`client/`** — Vite + React 19 + TypeScript SPA, React Router. All HTTP in `src/api.ts` (same-origin `/api`). i18n (vi/en) in `src/i18n.tsx` + `src/locales/*.json`; theme in `src/theme.tsx`.
+- **`shared/`** — type-only `.ts` shared by both sides via relative `import type`.
+- **`legacy/`** — the old JavaScript app, reference only. Never edit it.
 
-- **`App.jsx`** — 2700-line monolith: manages all view routing, global state (current document, user session, active feature tab). All major state lives here.
-- **`api.js`** — Single API client module (1061 lines); all HTTP calls to the backend are here.
-- **`LanguageContext.jsx` / `ThemeContext.jsx`** — Global providers for i18n (en/vi) and dark/light mode.
-- **`components/`** — 30+ feature components. Most are large modal/view components (ChatView, FlashcardView, QuizView, MindmapView, SummaryView, Dashboard, AdminPanel, CommunityFeed, etc.).
-- Dev server proxies `/api` → `http://localhost:3001`.
+### Deployment
 
-### Backend (`server/`)
-
-- **`index.js`** — 2700-line Express entry point: all middleware, route definitions, and inline handlers. Some routes are inline, others delegated to `routes/`.
-- **`routes/`** — Only a few route files (`featuresRoutes.js`, `notificationRoutes.js`, `statsRoutes.js`); most routing is in `index.js`.
-- **`services/`** — All business logic. Key services:
-  - `database.js` — SQLite schema initialization (WAL mode)
-  - `enhancedDatabase.js` — Advanced query operations
-  - `authService.js` — JWT, bcrypt, TOTP 2FA, WebAuthn, plan quotas
-  - `documentProcessor.js` — Multi-format extraction (PDF, DOCX, PPTX, XLSX, images via OCR)
-  - `chatService.js` + `qwenClient.js` + `promptBuilder.js` — AI chat with document context via Qwen (DashScope) API
-  - `flashcardGenerator.js`, `quizGenerator.js`, `mindmapGenerator.js`, `summaryGenerator.js` — AI content generation
-  - `srsService.js` — Spaced repetition system for flashcard review
-  - `paymentService.js` — SePay (Vietnamese bank transfer) integration
-  - `emailService.js` — Nodemailer SMTP delivery and tracking
-
-### Data Flow for AI Features
-
-1. User uploads document → `documentProcessor.js` extracts text
-2. Text stored in SQLite alongside document metadata
-3. Feature request (chat/flashcard/quiz/mindmap/summary) → route → `featureService.js` or `advancedFeatureService.js` → specific generator → `qwenClient.js` → Qwen API
-4. `promptBuilder.js` constructs prompts; `promptGuard.js` filters injection attempts
-
-### Database
-
-SQLite (`better-sqlite3`) with WAL mode. Schema initialized in `services/database.js`. Query optimization via `services/databaseIndexes.js`. No ORM — raw SQL throughout.
-
-### Tech Stack
-
-| Layer | Technology |
-|-------|-----------|
-| Frontend | React 18, Vite, TailwindCSS, ReactFlow (mindmaps), Axios |
-| Backend | Node.js (ES Modules), Express 4 |
-| Database | SQLite (better-sqlite3, WAL mode) |
-| AI | Qwen/DashScope API (OpenAI SDK-compatible fallback) |
-| Auth | JWT + bcrypt, TOTP 2FA (otpauth), WebAuthn (@simplewebauthn) |
-| File Processing | pdf-parse, mammoth, Tesseract.js (OCR), xlsx, node-pptx-parser |
-| Payment | SePay (Vietnamese bank transfers) |
-| Email | Nodemailer |
-| Logging | Winston |
-| Deployment | Docker + Docker Compose + Nginx + Cloudflare origin certs |
-
-### Environment Configuration
-
-Copy `.env.example` to `.env` in the root. Key variables:
-- `DASHSCOPE_API_KEY` / `OPENAI_API_KEY` — AI provider
-- `JWT_SECRET`, `REFRESH_TOKEN_SECRET` — Auth secrets
-- `TURNSTILE_SECRET_KEY` — Cloudflare CAPTCHA
-- `SMTP_*` — Email configuration
-- `SEPAY_*` — Payment integration
-- `PORT` (default 3001), `FRONTEND_URL`
-
-### Internationalization
-
-All user-facing strings are in `client/src/locales/en.json` and `vi.json`. Access via `useLanguage()` hook from `LanguageContext.jsx`.
+`Dockerfile` has two targets: `server` (API, non-root, SQLite in volume `data`, tesseract language cache in volume `ocr-cache`) and `web` (Nginx with `client/dist` baked in). Nginx (`deploy/nginx.conf`) serves the SPA, proxies `/api` (unbuffered for `/api/documents/:id/chat`) and terminates TLS with the Cloudflare origin cert; the API runs with `TRUST_PROXY=1`.
