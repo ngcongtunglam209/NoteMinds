@@ -653,7 +653,10 @@ export default function NotificationManager({ onBack }) {
             <div className="border-t border-line p-3 flex gap-2">
               {selectedNotification.action_url && (
                 <button
-                  onClick={() => { window.location.href = selectedNotification.action_url; }}
+                  onClick={() => {
+                    const url = new URL(selectedNotification.action_url, window.location.origin);
+                    if (url.origin === window.location.origin) window.location.href = url.pathname + url.search + url.hash;
+                  }}
                   className="flex-1 py-2 rounded-lg bg-primary-600 hover:bg-primary-500 text-white text-xs font-semibold transition-colors text-center"
                 >
                   {t('notifications.open', 'Open')}

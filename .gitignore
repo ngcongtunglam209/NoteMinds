@@ -94,4 +94,3 @@ pids/
 
 # Docker build context
 .docker/
-.dockerignore

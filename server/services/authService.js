@@ -126,16 +126,12 @@ export function authenticateUser(login, password, ip) {
     SELECT * FROM users WHERE username = ? OR email = ?
   `).get(login.toLowerCase(), login.toLowerCase());
 
-  if (!user) {
-    throw new Error('Tài khoản không tồn tại');
+  if (!user || !bcrypt.compareSync(password, user.password)) {
+    throw new Error('Tên đăng nhập hoặc mật khẩu không đúng');
   }
 
   if (user.is_banned) {
     throw new Error('Tài khoản đã bị khóa: ' + (user.ban_reason || 'Vi phạm quy định'));
-  }
-
-  if (!bcrypt.compareSync(password, user.password)) {
-    throw new Error('Mật khẩu không đúng');
   }
 
   // Update last login IP and time
@@ -171,7 +167,9 @@ export function generateToken(user) {
 
 export function verifyToken(token) {
   try {
-    return jwt.verify(token, JWT_SECRET);
+    const decoded = jwt.verify(token, JWT_SECRET);
+    // Purpose-scoped tokens (e.g. the 2FA temp token) are not session tokens
+    return decoded.purpose ? null : decoded;
   } catch {
     return null;
   }
@@ -184,9 +182,8 @@ export function optionalAuth(req, res, next) {
   if (authHeader?.startsWith('Bearer ')) {
     const token = authHeader.slice(7);
     const decoded = verifyToken(token);
-    if (decoded) {
-      req.user = getUserById(decoded.id);
-    }
+    const user = decoded && getUserById(decoded.id);
+    if (user && !user.isBanned) req.user = user;
   }
   next();
 }
@@ -204,6 +201,9 @@ export function requireAuth(req, res, next) {
   req.user = getUserById(decoded.id);
   if (!req.user) {
     return res.status(401).json({ error: 'Tài khoản không tồn tại' });
+  }
+  if (req.user.isBanned) {
+    return res.status(403).json({ error: 'Tài khoản đã bị khóa' });
   }
   next();
 }
@@ -430,12 +430,15 @@ export function resetPasswordWithToken(token, newPassword) {
 export function ensureAdmin() {
   const admin = db.prepare("SELECT id FROM users WHERE role = 'admin'").get();
   if (!admin) {
-    const hash = bcrypt.hashSync('admin123', 10);
+    const password = process.env.ADMIN_PASSWORD || crypto.randomBytes(12).toString('base64url');
+    const hash = bcrypt.hashSync(password, 10);
     db.prepare(`
       INSERT OR IGNORE INTO users (username, email, password, display_name, role, plan)
       VALUES ('admin', 'admin@notemind.local', ?, 'Admin', 'admin', 'unlimited')
     `).run(hash);
-    console.log('🔑 Default admin created — username: admin / password: admin123');
+    console.log(process.env.ADMIN_PASSWORD
+      ? '🔑 Default admin created — username: admin (password from ADMIN_PASSWORD)'
+      : `🔑 Default admin created — username: admin / password: ${password} (change it now)`);
   }
 }
 

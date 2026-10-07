@@ -197,21 +197,8 @@ export async function checkOrderStatus(orderId, userId) {
   }
 
   // Fallback: if still pending, try to verify via SePay API
-  if (order.status === 'pending' && sepayClient) {
-    try {
-      const apiOrder = await sepayClient.order.retrieve(orderId);
-      const apiStatus = (apiOrder?.order_status || apiOrder?.data?.order_status || '').toUpperCase();
-      logger.info(`[Payment] API fallback check: order=${orderId}, apiStatus=${apiStatus}`);
-      if (apiStatus === 'CAPTURED' || apiStatus === 'COMPLETED' || apiStatus === 'PAID') {
-        const transactionId = String(apiOrder?.transaction_id || apiOrder?.data?.transaction_id || apiOrder?.order_id || '');
-        const result = confirmPaymentById(orderId, transactionId);
-        if (result) {
-          return { ...order, status: 'paid' };
-        }
-      }
-    } catch (err) {
-      logger.debug(`[Payment] API fallback check failed for ${orderId}: ${err.message}`);
-    }
+  if (order.status === 'pending' && await confirmIfPaidAtSePay(orderId)) {
+    return { ...order, status: 'paid' };
   }
 
   return order;
@@ -269,8 +256,9 @@ export function confirmPayment(transferContent, transactionId) {
 // ── Verify SePay webhook via API key (legacy bank transfer flow) ──
 export function verifySepayWebhook(authHeader) {
   if (!SEPAY_API_KEY) {
-    logger.warn('[Payment] SEPAY_API_KEY not set, skipping webhook verification');
-    return true;
+    // Fail closed in production: an unverified webhook would let anyone mark orders paid.
+    logger.warn('[Payment] SEPAY_API_KEY not set, rejecting webhook');
+    return process.env.NODE_ENV !== 'production';
   }
   if (!authHeader) return false;
   const token = authHeader
@@ -285,60 +273,46 @@ export function verifySepayWebhook(authHeader) {
 }
 
 // ── Process SePay PG IPN ──
-// Per SePay docs: IPN sends { notification_type, order: { order_status, order_invoice_number, ... }, transaction, ... }
-// Just check notification_type + order_status, match DB, confirm payment. Return 200.
-export function verifyAndProcessIPN(data) {
-  const notificationType = data.notification_type || '';
-  const order = data.order || {};
-  const transaction = data.transaction || {};
-  const orderId = order.order_invoice_number;
-
+// The IPN endpoint is unauthenticated, so its body is untrusted: only the order id is taken
+// from it, and the paid status is re-checked against the SePay API before confirming.
+export async function verifyAndProcessIPN(data) {
+  const orderId = data?.order?.order_invoice_number;
   if (!orderId) {
     return { success: false, reason: 'missing_order_invoice_number' };
   }
 
-  const ipnStatus = (order.order_status || '').toUpperCase();
-  const transactionId = String(transaction.id || order.order_id || '');
-
-  logger.info(`[Payment] IPN: order=${orderId}, status=${ipnStatus}, type=${notificationType}`);
-
-  // Only process paid notifications
-  if (notificationType !== 'ORDER_PAID' && notificationType !== 'PAYMENT_SUCCESS') {
-    logger.info(`[Payment] IPN ignored: notification_type=${notificationType}`);
-    return { success: false, reason: 'not_payment_notification', type: notificationType };
-  }
-
-  if (ipnStatus !== 'CAPTURED' && ipnStatus !== 'COMPLETED' && ipnStatus !== 'PAID') {
-    logger.info(`[Payment] IPN status not paid: ${ipnStatus}`);
-    return { success: false, reason: 'not_paid', status: ipnStatus };
-  }
-
-  // Look up in our DB
-  const dbOrder = db.prepare('SELECT * FROM payment_orders WHERE id = ?').get(orderId);
+  const dbOrder = db.prepare('SELECT * FROM payment_orders WHERE id = ?').get(String(orderId));
   if (!dbOrder) {
     logger.warn(`[Payment] IPN: no order found in DB for id: ${orderId}`);
     return { success: false, reason: 'no_matching_order' };
   }
 
-  // Already paid — idempotent
   if (dbOrder.status === 'paid') {
-    logger.info(`[Payment] IPN: order ${orderId} already paid, skipping`);
     return { success: true, orderId, plan: dbOrder.plan, already_paid: true };
   }
 
-  // Verify amount (order_amount comes as "2000.00" string from SePay)
-  const amount = Math.round(Number(order.order_amount) || 0);
-  if (amount > 0 && amount < dbOrder.amount) {
-    logger.warn(`[Payment] IPN amount mismatch: received ${amount}, expected ${dbOrder.amount}`);
-    return { success: false, reason: 'amount_mismatch' };
-  }
-
-  const result = confirmPaymentById(orderId, transactionId);
+  const result = await confirmIfPaidAtSePay(dbOrder.id);
   if (!result) {
-    return { success: false, reason: 'confirmation_failed' };
+    return { success: false, reason: 'not_paid_at_sepay' };
   }
 
   return { success: true, orderId, plan: dbOrder.plan, userId: dbOrder.user_id };
+}
+
+// Ask SePay whether the order is paid; confirm it locally if so.
+async function confirmIfPaidAtSePay(orderId) {
+  if (!sepayClient) return null;
+  try {
+    const apiOrder = await sepayClient.order.retrieve(orderId);
+    const apiStatus = (apiOrder?.order_status || apiOrder?.data?.order_status || '').toUpperCase();
+    logger.info(`[Payment] SePay API check: order=${orderId}, apiStatus=${apiStatus}`);
+    if (apiStatus !== 'CAPTURED' && apiStatus !== 'COMPLETED' && apiStatus !== 'PAID') return null;
+    const transactionId = String(apiOrder?.transaction_id || apiOrder?.data?.transaction_id || apiOrder?.order_id || '');
+    return confirmPaymentById(orderId, transactionId);
+  } catch (err) {
+    logger.debug(`[Payment] SePay API check failed for ${orderId}: ${err.message}`);
+    return null;
+  }
 }
 
 // ── Confirm payment by order ID (for SePay PG IPN) ──
@@ -388,10 +362,7 @@ export function confirmPaymentById(orderId, transactionId) {
   return order;
 }
 
-// ── Process SePay PG IPN ── (delegates to verifyAndProcessIPN)
-export function processSePayPgIPN(data) {
-  return verifyAndProcessIPN(data);
-}
+export const processSePayPgIPN = verifyAndProcessIPN;
 
 // ── Process SePay webhook (legacy bank transfer flow) ──
 export function processSepayWebhook(data) {

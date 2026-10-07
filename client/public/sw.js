@@ -49,10 +49,10 @@ self.addEventListener('fetch', (event) => {
           return response;
         })
         .catch(() => {
-          return caches.match('/') || new Response(
+          return caches.match('/').then((cached) => cached || new Response(
             '<html><body><h1>Offline</h1></body></html>',
             { headers: { 'Content-Type': 'text/html' } }
-          );
+          ));
         })
     );
     return;

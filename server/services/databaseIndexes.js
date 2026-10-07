@@ -1,9 +1,6 @@
 import Database from 'better-sqlite3';
-import path from 'path';
-import { fileURLToPath } from 'url';
+import db from './database.js';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const DB_PATH = path.join(__dirname, '../data/notemind.db');
 
 /**
  * Initialize database indexes for optimal query performance
@@ -11,7 +8,6 @@ const DB_PATH = path.join(__dirname, '../data/notemind.db');
  */
 export function initializeIndexes() {
   try {
-    const db = new Database(DB_PATH);
     
     console.log('[Database] Creating indexes for optimal performance...');
 
@@ -114,7 +110,6 @@ export function initializeIndexes() {
       console.log('[Database] ✓ Pragmas applied');
     }
     
-    db.close();
     return true;
   } catch (error) {
     console.error('[Database] Error creating indexes:', error.message);
@@ -128,13 +123,11 @@ export function initializeIndexes() {
  */
 export function analyzeDatabase() {
   try {
-    const db = new Database(DB_PATH);
     
     console.log('[Database] Running ANALYZE...');
     db.exec('ANALYZE');
     
     console.log('[Database] ✓ Database analysis complete');
-    db.close();
     return true;
   } catch (error) {
     console.error('[Database] Error analyzing database:', error.message);
@@ -147,7 +140,6 @@ export function analyzeDatabase() {
  */
 export function getDatabaseStats() {
   try {
-    const db = new Database(DB_PATH);
     
     const stats = {
       users: 0,
@@ -181,7 +173,6 @@ export function getDatabaseStats() {
       // pragma may fail
     }
     
-    db.close();
     return stats;
   } catch (error) {
     console.error('[Database] Error getting stats:', error.message);

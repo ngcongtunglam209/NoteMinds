@@ -4,6 +4,7 @@ import { fileURLToPath } from 'url';
 import { v4 as uuidv4 } from 'uuid';
 import PDFDocument from 'pdfkit';
 import fs from 'fs';
+import db from './database.js';
 
 let createCanvas = null;
 try {
@@ -14,7 +15,6 @@ try {
 }
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const DB_PATH = path.join(__dirname, '../data/notemind.db');
 const EXPORTS_DIR = path.join(__dirname, '../exports');
 
 // Ensure exports directory exists
@@ -28,14 +28,12 @@ if (!fs.existsSync(EXPORTS_DIR)) {
 
 export function queueSyncAction(userId, entityType, entityId, action, data) {
   try {
-    const db = new Database(DB_PATH);
 
     db.prepare(`
       INSERT INTO sync_queue (id, user_id, entity_type, entity_id, action, data)
       VALUES (?, ?, ?, ?, ?, ?)
     `).run(uuidv4(), userId, entityType, entityId, action, JSON.stringify(data) || null);
 
-    db.close();
     return { success: true };
   } catch (error) {
     console.error('[Offline Sync] Error queuing:', error.message);
@@ -45,7 +43,6 @@ export function queueSyncAction(userId, entityType, entityId, action, data) {
 
 export function getPendingSyncActions(userId) {
   try {
-    const db = new Database(DB_PATH);
 
     const pendingActions = db.prepare(`
       SELECT id, entity_type, entity_id, action, data, created_at
@@ -55,7 +52,6 @@ export function getPendingSyncActions(userId) {
       LIMIT 100
     `).all(userId);
 
-    db.close();
     return pendingActions;
   } catch (error) {
     console.error('[Offline Sync] Error getting pending:', error.message);
@@ -65,13 +61,11 @@ export function getPendingSyncActions(userId) {
 
 export function markSynced(syncQueueId) {
   try {
-    const db = new Database(DB_PATH);
 
     db.prepare(`
       UPDATE sync_queue SET synced_at = CURRENT_TIMESTAMP WHERE id = ?
     `).run(syncQueueId);
 
-    db.close();
     return { success: true };
   } catch (error) {
     console.error('[Offline Sync] Error marking synced:', error.message);
@@ -107,7 +101,6 @@ export function setUserPreference(userId, key, value) {
       return { success: false, error: `Unknown preference key: ${key}` };
     }
 
-    const db = new Database(DB_PATH);
 
     const exists = db.prepare(`
       SELECT id FROM user_preferences WHERE user_id = ?
@@ -124,7 +117,6 @@ export function setUserPreference(userId, key, value) {
       `).run(uuidv4(), userId, value);
     }
 
-    db.close();
     return { success: true };
   } catch (error) {
     console.error('[Preferences] Error setting:', error.message);
@@ -134,7 +126,6 @@ export function setUserPreference(userId, key, value) {
 
 export function getUserPreferences(userId) {
   try {
-    const db = new Database(DB_PATH);
 
     let prefs = db.prepare(`
       SELECT * FROM user_preferences WHERE user_id = ?
@@ -152,7 +143,6 @@ export function getUserPreferences(userId) {
       `).get(userId);
     }
 
-    db.close();
 
     // Map DB column names to frontend-friendly keys
     if (prefs) {
@@ -177,7 +167,6 @@ export function getUserPreferences(userId) {
 
 export function exportFlashcardsAsCSV(documentId, userId) {
   try {
-    const db = new Database(DB_PATH);
 
     const flashcards = db.prepare(`
       SELECT fc.id, fc.front, fc.back,
@@ -188,7 +177,6 @@ export function exportFlashcardsAsCSV(documentId, userId) {
       ORDER BY fc.created_at ASC
     `).all(userId, documentId);
 
-    db.close();
 
     // Create CSV
     let csv = 'Front,Back,EaseFactor,Interval,Repetitions,NextReview\n';
@@ -214,7 +202,6 @@ export function exportFlashcardsAsCSV(documentId, userId) {
 
 export function exportConversationAsPDF(conversationId) {
   try {
-    const db = new Database(DB_PATH);
 
     const conversation = db.prepare(`
       SELECT * FROM conversations WHERE id = ?
@@ -226,7 +213,6 @@ export function exportConversationAsPDF(conversationId) {
       ORDER BY created_at ASC
     `).all(conversationId);
 
-    db.close();
 
     // Create PDF
     const doc = new PDFDocument();

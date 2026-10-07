@@ -25,6 +25,9 @@ const FROM_NAME = process.env.SMTP_FROM_NAME || 'NoteMinds';
 const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:5173';
 const BACKEND_URL = process.env.API_DOMAIN || process.env.BACKEND_URL || 'http://localhost:3000';
 
+// User-controlled values (usernames, display names) must not inject HTML into mails
+const esc = (v) => String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
 // ── Token generation ────────────────────────────────────
 export function generateVerificationToken() {
     return crypto.randomBytes(32).toString('hex');
@@ -224,7 +227,7 @@ function verificationEmailTemplate(username, verifyUrl, trackingId, lang = 'vi')
 
     <!-- Body text -->
     <p style="margin:0 0 28px; font-size:14px; color:#a1a1aa; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; line-height:1.7;">
-      ${t(lang, 'verifyEmailGreeting')} <strong style="color:#fafafa;">${username}</strong>,<br>
+      ${t(lang, 'verifyEmailGreeting')} <strong style="color:#fafafa;">${esc(username)}</strong>,<br>
       ${t(lang, 'verifyEmailBody')}
     </p>
 
@@ -293,7 +296,7 @@ function resetPasswordEmailTemplate(username, resetUrl, trackingId, lang = 'vi')
 
     <!-- Body text -->
     <p style="margin:0 0 28px; font-size:14px; color:#a1a1aa; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; line-height:1.7;">
-      ${t(lang, 'resetPasswordGreeting')} <strong style="color:#fafafa;">${username}</strong>,<br>
+      ${t(lang, 'resetPasswordGreeting')} <strong style="color:#fafafa;">${esc(username)}</strong>,<br>
       ${t(lang, 'resetPasswordBody')}
     </p>
 
@@ -564,7 +567,7 @@ export async function sendBlastEmail(email, subject, content, displayName, lang 
 
     <!-- Greeting -->
     <p style="margin:0 0 20px; font-size:14px; color:#a1a1aa; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; line-height:1.7;">
-      ${t(lang, 'verifyEmailGreeting')} <strong style="color:#fafafa;">${displayName || (lang === 'vi' ? 'bạn' : 'there')}</strong>,
+      ${t(lang, 'verifyEmailGreeting')} <strong style="color:#fafafa;">${esc(displayName) || (lang === 'vi' ? 'bạn' : 'there')}</strong>,
     </p>
 
     <!-- Content -->

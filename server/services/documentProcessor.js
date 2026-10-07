@@ -3,10 +3,21 @@ import path from 'path';
 import { Buffer } from 'buffer';
 import { extractTextFromImage } from './ocrService.js';
 
+// Caps so one upload can't stall the event loop or blow up memory (text is kept in memory + sent to the AI)
+const MAX_TEXT_CHARS = 500_000;
+const MAX_PDF_PAGES = 300;
+const MAX_SHEET_ROWS = 5000;
+const MAX_ZIP_ENTRY_BYTES = 20 * 1024 * 1024;
+
 /**
  * Process uploaded document and extract text content
  */
 export async function processDocument(filePath) {
+  const text = await extractText(filePath);
+  return text.length > MAX_TEXT_CHARS ? text.slice(0, MAX_TEXT_CHARS) : text;
+}
+
+async function extractText(filePath) {
   const ext = path.extname(filePath).toLowerCase();
 
   switch (ext) {
@@ -27,7 +38,7 @@ export async function processDocument(filePath) {
       return await extractTextFromImage(filePath);
     case '.txt':
     case '.md':
-      return fs.readFileSync(filePath, 'utf-8');
+      return fs.promises.readFile(filePath, 'utf-8');
     case '.mp3':
     case '.wav':
     case '.m4a':
@@ -46,10 +57,11 @@ async function extractPdfText(filePath) {
   try {
     // Dynamic import for pdf-parse (CommonJS module)
     const pdfParse = (await import('pdf-parse')).default;
-    const dataBuffer = fs.readFileSync(filePath);
+    const dataBuffer = await fs.promises.readFile(filePath);
 
     // Custom page renderer for better Vietnamese text extraction
     const options = {
+      max: MAX_PDF_PAGES,
       // Normalize Unicode for Vietnamese diacritics (NFC form)
       pagerender: async function (pageData) {
         const textContent = await pageData.getTextContent({
@@ -255,7 +267,7 @@ async function extractDocxText(filePath) {
 async function extractPptxText(filePath) {
   try {
     const JSZip = (await import('jszip')).default || (await import('jszip'));
-    const dataBuffer = fs.readFileSync(filePath);
+    const dataBuffer = await fs.promises.readFile(filePath);
     const zip = await JSZip.loadAsync(dataBuffer);
 
     const slides = [];
@@ -269,6 +281,8 @@ async function extractPptxText(filePath) {
       });
 
     for (const slideFile of slideFiles) {
+      // zip-bomb guard: skip entries that inflate absurdly
+      if ((zip.files[slideFile]._data?.uncompressedSize || 0) > MAX_ZIP_ENTRY_BYTES) continue;
       const xmlContent = await zip.files[slideFile].async('string');
       // Extract text from XML tags <a:t>...</a:t>
       const textMatches = xmlContent.match(/<a:t>([^<]*)<\/a:t>/g);
@@ -300,7 +314,7 @@ async function extractPptxText(filePath) {
 async function extractXlsxText(filePath) {
   try {
     const XLSX = await import('xlsx');
-    const workbook = XLSX.readFile(filePath);
+    const workbook = XLSX.readFile(filePath, { sheetRows: MAX_SHEET_ROWS });
 
     const sheets = [];
     for (const sheetName of workbook.SheetNames) {

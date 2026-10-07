@@ -19,7 +19,7 @@ import { getUserPreferences } from './services/syncAndExportService.js';
 import { normalizeLanguage } from './services/promptBuilder.js';
 import {
   createUser, authenticateUser, generateToken, getUserById,
-  optionalAuth, requireAuth, requireAdmin,
+  optionalAuth, requireAuth, requireAdmin, verifyToken,
   getUploadCount, logUpload, getUploadLimit, getChatLimit,
   getAllUsers, setUserPlan, setUserRole,
   updateUserProfile, changePassword, ensureAdmin,
@@ -64,7 +64,7 @@ import {
 } from './services/paymentService.js';
 import './services/envLoader.js';
 import Database from 'better-sqlite3';
-import jwt from 'jsonwebtoken';
+import db from './services/database.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -112,7 +112,7 @@ async function verifyTurnstile(token, ip) {
 }
 
 // Trust proxy (nginx) for correct client IP
-app.set('trust proxy', true);
+app.set('trust proxy', 1);
 
 // CORS Configuration
 // ==== SECURITY: Use whitelist for all origins, not just development ====
@@ -164,7 +164,7 @@ const corsOptions = {
 // Middleware
 app.use(cors(corsOptions));
 app.use(cookieParser());
-app.use(express.json({ limit: '50mb' }));
+app.use(express.json({ limit: '10mb' }));
 
 // ==== SECURITY: Security headers ====
 app.use((req, res, next) => {
@@ -299,11 +299,9 @@ function broadcastNotifEvent(userId, eventType, data) {
 }
 
 // Database path for document persistence
-const DB_PATH = path.join(__dirname, 'data', 'notemind.db');
 
 function persistDocumentToDB(docId, userId, filePath, originalName, status, textLength = 0) {
   try {
-    const db = new Database(DB_PATH);
     const existing = db.prepare('SELECT id FROM documents WHERE id = ?').get(docId);
     if (existing) {
       db.prepare(`
@@ -315,19 +313,15 @@ function persistDocumentToDB(docId, userId, filePath, originalName, status, text
         VALUES (?, ?, ?, ?, ?, ?)
       `).run(docId, userId || null, filePath, originalName, status, textLength);
     }
-    db.close();
   } catch (err) {
     console.error('[DB] Error persisting document:', err.message);
   }
 }
 
 // Helper to extract real client IP (behind nginx proxy)
+// trust proxy = 1, so req.ip is the address nginx saw, not a client-supplied header
 function getClientIp(req) {
-  return req.headers['x-forwarded-for']?.split(',')[0]?.trim()
-    || req.headers['x-real-ip']
-    || req.ip
-    || req.connection?.remoteAddress
-    || 'unknown';
+  return req.ip || req.socket?.remoteAddress || 'unknown';
 }
 
 // Ban check middleware
@@ -341,6 +335,24 @@ function checkBan(req, res, next) {
 
 // Apply ban check to all API routes
 app.use('/api', checkBan);
+
+// ── Maintenance mode middleware ──
+app.use('/api', (req, res, next) => {
+  // Always allow these paths through (req.path is relative to /api mount)
+  const bypass = ['/system/settings', '/auth', '/login', '/register', '/me'];
+  if (bypass.some(p => req.path.startsWith(p)) || req.path.includes('/admin') || req.path.includes('/track-login')) return next();
+
+  try {
+    const row = db.prepare("SELECT value FROM system_settings WHERE key = 'maintenance_mode'").get();
+    if (row && JSON.parse(row.value)) {
+      const decoded = verifyToken(req.headers.authorization?.split(' ')[1] || '');
+      const user = decoded && getUserById(decoded.id);
+      if (user?.role === 'admin') return next();
+      return res.status(503).json({ error: 'maintenance', message: 'Hệ thống đang bảo trì. Vui lòng quay lại sau.' });
+    }
+  } catch { }
+  next();
+});
 
 // ==== SECURITY: Rate limiting for authentication endpoints ====
 const authLimiter = rateLimit({
@@ -362,6 +374,23 @@ const registerLimiter = rateLimit({
   skipSuccessfulRequests: true,
 });
 
+// 2FA codes are 6 digits: without a limit a valid tempToken allows brute force
+const twoFactorLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  message: 'Quá nhiều lần thử, vui lòng thử lại sau 15 phút',
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+const emailLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: 5,
+  message: 'Quá nhiều yêu cầu gửi email, vui lòng thử lại sau',
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
 // ============ AUTH ROUTES ============
 
 app.post('/api/auth/register', registerLimiter, async (req, res) => {
@@ -374,8 +403,8 @@ app.post('/api/auth/register', registerLimiter, async (req, res) => {
     if (!username || !email || !password) {
       return res.status(400).json({ error: 'Vui lòng điền đầy đủ thông tin' });
     }
-    if (username.length < 3) {
-      return res.status(400).json({ error: 'Tên đăng nhập phải có ít nhất 3 ký tự' });
+    if (!/^[a-zA-Z0-9_.-]{3,30}$/.test(username)) {
+      return res.status(400).json({ error: 'Tên đăng nhập phải có 3-30 ký tự (chữ, số, _ . -)' });
     }
     if (password.length < 6) {
       return res.status(400).json({ error: 'Mật khẩu phải có ít nhất 6 ký tự' });
@@ -437,13 +466,13 @@ app.post('/api/auth/verify-email', async (req, res) => {
   }
 });
 
-app.post('/api/auth/resend-verification', async (req, res) => {
+app.post('/api/auth/resend-verification', emailLimiter, async (req, res) => {
   try {
     const { email } = req.body;
     if (!email) return res.status(400).json({ error: 'Vui lòng nhập email' });
     const user = getUserByEmail(email);
-    if (!user) return res.status(404).json({ error: 'Email không tồn tại trong hệ thống' });
-    if (user.email_verified) return res.status(400).json({ error: 'Email đã được xác minh rồi' });
+    // Same answer whether or not the email exists (no account enumeration)
+    if (!user || user.email_verified) return res.json({ message: 'Email xác minh đã được gửi lại!' });
 
     const verifyToken = generateVerificationToken();
     setVerificationToken(user.id, verifyToken);
@@ -455,7 +484,7 @@ app.post('/api/auth/resend-verification', async (req, res) => {
   }
 });
 
-app.post('/api/auth/forgot-password', async (req, res) => {
+app.post('/api/auth/forgot-password', emailLimiter, async (req, res) => {
   try {
     const { email, turnstileToken } = req.body;
     const ip = getClientIp(req);
@@ -552,7 +581,7 @@ app.post('/api/auth/login', authLimiter, async (req, res) => {
 
 // ── 2FA Routes ──
 
-app.post('/api/auth/2fa/verify', async (req, res) => {
+app.post('/api/auth/2fa/verify', twoFactorLimiter, async (req, res) => {
   try {
     const { tempToken, totpCode } = req.body;
     if (!tempToken || !totpCode) {
@@ -570,7 +599,7 @@ app.post('/api/auth/2fa/verify', async (req, res) => {
   }
 });
 
-app.post('/api/auth/2fa/recovery', async (req, res) => {
+app.post('/api/auth/2fa/recovery', twoFactorLimiter, async (req, res) => {
   try {
     const { tempToken, recoveryCode } = req.body;
     if (!tempToken || !recoveryCode) {
@@ -679,7 +708,7 @@ app.post('/api/auth/passkey/login-options', async (req, res) => {
   }
 });
 
-app.post('/api/auth/passkey/login-verify', async (req, res) => {
+app.post('/api/auth/passkey/login-verify', twoFactorLimiter, async (req, res) => {
   try {
     const { response } = req.body;
     if (!response) return res.status(400).json({ error: 'Missing passkey response' });
@@ -713,7 +742,7 @@ app.post('/api/auth/passkey/auth-options', async (req, res) => {
 });
 
 // Authentication during 2FA: verify response
-app.post('/api/auth/passkey/auth-verify', async (req, res) => {
+app.post('/api/auth/passkey/auth-verify', twoFactorLimiter, async (req, res) => {
   try {
     const { tempToken, response } = req.body;
     if (!tempToken || !response) return res.status(400).json({ error: 'Missing data' });
@@ -852,9 +881,7 @@ app.post('/api/users/profile/avatar', requireAuth, avatarUpload.single('avatar')
     }
 
     const avatarUrl = `/uploads/avatars/${req.file.filename}`;
-    const db = new Database(DB_PATH);
     db.prepare("UPDATE users SET avatar_url = ?, updated_at = datetime('now') WHERE id = ?").run(avatarUrl, req.user.id);
-    db.close();
     const updated = getUserById(req.user.id);
     res.json({ user: updated });
   } catch (err) {
@@ -1059,6 +1086,7 @@ app.post('/api/upload', requireAuth, uploadRateLimitMiddleware, upload.single('f
       const extractedText = await processDocument(filePath);
       documents.set(docId, {
         id: docId,
+        owner_id: userId,
         fileName: originalName,
         filePath,
         text: extractedText,
@@ -1091,9 +1119,7 @@ app.post('/api/upload', requireAuth, uploadRateLimitMiddleware, upload.single('f
 // Get all folders for user
 app.get('/api/folders', requireAuth, (req, res) => {
   try {
-    const db = new Database(DB_PATH);
     const folders = db.prepare('SELECT * FROM folders WHERE user_id = ? ORDER BY created_at DESC').all(req.user.id);
-    db.close();
     res.json({ folders });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -1106,11 +1132,9 @@ app.post('/api/folders', requireAuth, (req, res) => {
     const { name, color } = req.body;
     if (!name) return res.status(400).json({ error: 'Folder name is required' });
     const id = uuidv4();
-    const db = new Database(DB_PATH);
     db.prepare('INSERT INTO folders (id, user_id, name, color) VALUES (?, ?, ?, ?)')
       .run(id, req.user.id, name, color || '#3b82f6');
     const folder = db.prepare('SELECT * FROM folders WHERE id = ?').get(id);
-    db.close();
     res.json(folder);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -1121,17 +1145,14 @@ app.post('/api/folders', requireAuth, (req, res) => {
 app.put('/api/folders/:id', requireAuth, (req, res) => {
   try {
     const { name, color } = req.body;
-    const db = new Database(DB_PATH);
     // Check ownership
     const existing = db.prepare('SELECT * FROM folders WHERE id = ? AND user_id = ?').get(req.params.id, req.user.id);
     if (!existing) {
-      db.close();
       return res.status(404).json({ error: 'Folder not found' });
     }
     db.prepare('UPDATE folders SET name = COALESCE(?, name), color = COALESCE(?, color), updated_at = CURRENT_TIMESTAMP WHERE id = ?')
       .run(name, color, req.params.id);
     const updated = db.prepare('SELECT * FROM folders WHERE id = ?').get(req.params.id);
-    db.close();
     res.json(updated);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -1141,14 +1162,11 @@ app.put('/api/folders/:id', requireAuth, (req, res) => {
 // Delete folder (cascade handled partially by foreign keys, but documents will just lose folder_id due to ON DELETE SET NULL)
 app.delete('/api/folders/:id', requireAuth, (req, res) => {
   try {
-    const db = new Database(DB_PATH);
     const existing = db.prepare('SELECT * FROM folders WHERE id = ? AND user_id = ?').get(req.params.id, req.user.id);
     if (!existing) {
-      db.close();
       return res.status(404).json({ error: 'Folder not found' });
     }
     db.prepare('DELETE FROM folders WHERE id = ? AND user_id = ?').run(req.params.id, req.user.id);
-    db.close();
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -1159,12 +1177,10 @@ app.delete('/api/folders/:id', requireAuth, (req, res) => {
 app.put('/api/documents/:id/folder', requireAuth, (req, res) => {
   try {
     const { folder_id } = req.body; // Can be null to remove from folder
-    const db = new Database(DB_PATH);
 
     // Check document ownership
     const doc = db.prepare('SELECT * FROM documents WHERE id = ? AND user_id = ?').get(req.params.id, req.user.id);
     if (!doc) {
-      db.close();
       return res.status(404).json({ error: 'Document not found' });
     }
 
@@ -1172,14 +1188,12 @@ app.put('/api/documents/:id/folder', requireAuth, (req, res) => {
     if (folder_id) {
       const folder = db.prepare('SELECT * FROM folders WHERE id = ? AND user_id = ?').get(folder_id, req.user.id);
       if (!folder) {
-        db.close();
         return res.status(404).json({ error: 'Folder not found' });
       }
     }
 
     db.prepare('UPDATE documents SET folder_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
       .run(folder_id || null, req.params.id);
-    db.close();
     res.json({ success: true, folder_id: folder_id || null });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -1195,7 +1209,6 @@ app.get('/api/documents/history', optionalAuth, (req, res) => {
     if (!userId) {
       return res.json({ documents: [] });
     }
-    const db = new Database(DB_PATH);
     const docs = db.prepare(`
       SELECT id, original_name, status, text_length, deleted_at, created_at, updated_at, folder_id
       FROM documents
@@ -1203,7 +1216,6 @@ app.get('/api/documents/history', optionalAuth, (req, res) => {
       ORDER BY created_at DESC
       LIMIT 50
     `).all(userId);
-    db.close();
     res.json({ documents: docs });
   } catch (error) {
     console.error('Error getting document history:', error.message);
@@ -1214,9 +1226,7 @@ app.get('/api/documents/history', optionalAuth, (req, res) => {
 // ==== SECURITY: Document access verification helper ====
 function verifyDocumentAccess(docId, userId, userRole) {
   try {
-    const db = new Database(DB_PATH);
     const doc = db.prepare('SELECT id, user_id FROM documents WHERE id = ?').get(docId);
-    db.close();
 
     if (!doc) {
       return { allowed: false, status: 404, message: 'Document not found' };
@@ -1239,20 +1249,43 @@ function verifyDocumentAccess(docId, userId, userRole) {
   }
 }
 
+function requireDocAccess(req, res, next) {
+  const check = verifyDocumentAccess(req.params.docId, req.user.id, req.user.role);
+  if (!check.allowed) return res.status(check.status).json({ error: check.message });
+  next();
+}
+
+// Returns the in-memory doc, rebuilding it from the stored file if needed.
+// Non-ready docs come back as { status } so callers can report "still processing".
+async function loadDocument(docId) {
+  const memDoc = documents.get(docId);
+  if (memDoc) return memDoc;
+
+  const row = db.prepare('SELECT id, user_id, file_path, original_name, status, deleted_at FROM documents WHERE id = ?').get(docId);
+  if (!row || row.deleted_at || !row.file_path || !fs.existsSync(row.file_path)) return null;
+  if (row.status !== 'ready') return { id: row.id, status: row.status };
+
+  // ponytail: concurrent first requests may each re-extract; dedupe with a promise map if that shows up
+  const text = await processDocument(row.file_path);
+  const doc = {
+    id: row.id,
+    owner_id: row.user_id,
+    fileName: row.original_name,
+    filePath: row.file_path,
+    text,
+    status: 'ready',
+    createdAt: new Date().toISOString(),
+  };
+  documents.set(row.id, doc);
+  return doc;
+}
+
 // Get saved sessions for a document (history viewer)
-app.get('/api/documents/:docId/sessions', requireAuth, (req, res) => {
+app.get('/api/documents/:docId/sessions', requireAuth, requireDocAccess, (req, res) => {
   try {
     const docId = req.params.docId;
 
-    // Verify ownership
-    const accessCheck = verifyDocumentAccess(docId, req.user.id, req.user.role);
-    if (!accessCheck.allowed) {
-      return res.status(accessCheck.status).json({ error: accessCheck.message });
-    }
-
-    const db = new Database(DB_PATH);
     const doc = db.prepare('SELECT id, user_id, original_name, status, text_length, deleted_at, created_at FROM documents WHERE id = ?').get(docId);
-    db.close();
 
     if (!doc) {
       return res.status(404).json({ error: 'Document not found' });
@@ -1295,32 +1328,13 @@ app.get('/api/documents/:docId/status', (req, res) => {
 });
 
 // ==== SECURITY: Delete document requires authentication and ownership verification ====
-app.delete('/api/documents/:docId', requireAuth, (req, res) => {
+app.delete('/api/documents/:docId', requireAuth, requireDocAccess, (req, res) => {
   try {
     const docId = req.params.docId;
-    const userId = req.user.id;
-    const userRole = req.user.role;
-
-    // Verify user owns the document or is admin
-    if (userRole !== 'admin') {
-      const db = new Database(DB_PATH);
-      const doc = db.prepare('SELECT id, user_id FROM uploaded_documents WHERE id = ?').get(docId);
-      db.close();
-
-      if (!doc || doc.user_id !== userId) {
-        return res.status(403).json({ error: 'You do not have permission to delete this document' });
-      }
-    }
-
-    // Remove from memory cache
     documents.delete(docId);
-
-    // Mark as deleted in database
-    const db = new Database(DB_PATH);
-    db.prepare('UPDATE uploaded_documents SET is_deleted = 1, deleted_at = CURRENT_TIMESTAMP WHERE id = ?').run(docId);
-    db.close();
-
-    console.log(`[DELETE] Document ${docId} deleted by user ${userId}`);
+    // Soft delete; runDocumentCleanup purges the file
+    db.prepare('UPDATE documents SET deleted_at = CURRENT_TIMESTAMP, is_public = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(docId);
+    console.log(`[DELETE] Document ${docId} deleted by user ${req.user.id}`);
     res.json({ success: true, message: 'Document deleted successfully' });
   } catch (err) {
     console.error(`[DELETE] Error deleting document:`, err.message);
@@ -1331,13 +1345,11 @@ app.delete('/api/documents/:docId', requireAuth, (req, res) => {
 // ── Session persistence helpers ──
 function saveDocumentSession(docId, sessionType, data) {
   try {
-    const db = new Database(DB_PATH);
     db.prepare(`
       INSERT INTO document_sessions (document_id, session_type, data, updated_at)
       VALUES (?, ?, ?, CURRENT_TIMESTAMP)
       ON CONFLICT(document_id, session_type) DO UPDATE SET data = excluded.data, updated_at = CURRENT_TIMESTAMP
     `).run(docId, sessionType, JSON.stringify(data));
-    db.close();
   } catch (err) {
     console.error(`[Session] Error saving ${sessionType} for ${docId}:`, err.message);
   }
@@ -1345,9 +1357,7 @@ function saveDocumentSession(docId, sessionType, data) {
 
 function getDocumentSession(docId, sessionType) {
   try {
-    const db = new Database(DB_PATH);
     const row = db.prepare('SELECT data FROM document_sessions WHERE document_id = ? AND session_type = ?').get(docId, sessionType);
-    db.close();
     return row ? JSON.parse(row.data) : null;
   } catch (err) {
     console.error(`[Session] Error loading ${sessionType} for ${docId}:`, err.message);
@@ -1357,9 +1367,7 @@ function getDocumentSession(docId, sessionType) {
 
 function getAllDocumentSessions(docId) {
   try {
-    const db = new Database(DB_PATH);
     const rows = db.prepare('SELECT session_type, data FROM document_sessions WHERE document_id = ?').all(docId);
-    db.close();
     const sessions = {};
     for (const row of rows) {
       sessions[row.session_type] = JSON.parse(row.data);
@@ -1372,15 +1380,9 @@ function getAllDocumentSessions(docId) {
 }
 
 // Download original document
-app.get('/api/documents/:docId/download', requireAuth, async (req, res) => {
+app.get('/api/documents/:docId/download', requireAuth, requireDocAccess, async (req, res) => {
   try {
     const docId = req.params.docId;
-
-    // Verify ownership
-    const accessCheck = verifyDocumentAccess(docId, req.user.id, req.user.role);
-    if (!accessCheck.allowed) {
-      return res.status(accessCheck.status).json({ error: accessCheck.message });
-    }
 
     // First try to find it in memory to get originalName
     let originalName = 'document.txt';
@@ -1390,9 +1392,7 @@ app.get('/api/documents/:docId/download', requireAuth, async (req, res) => {
     }
 
     // Always fetch from DB to get the true file path
-    const db = new Database(DB_PATH);
     const dbDoc = db.prepare('SELECT file_path, original_name FROM documents WHERE id = ?').get(docId);
-    db.close();
 
     if (!dbDoc || !dbDoc.file_path || !fs.existsSync(dbDoc.file_path)) {
       return res.status(404).json({ error: 'Tài liệu không còn tồn tại trên máy chủ' });
@@ -1416,9 +1416,9 @@ app.get('/api/documents/:docId/download', requireAuth, async (req, res) => {
 });
 
 // Generate mindmap
-app.post('/api/documents/:docId/mindmap', async (req, res) => {
+app.post('/api/documents/:docId/mindmap', requireAuth, requireDocAccess, async (req, res) => {
   try {
-    const doc = documents.get(req.params.docId);
+    const doc = await loadDocument(req.params.docId);
     if (!doc) {
       return res.status(404).json({ error: 'Document not found' });
     }
@@ -1456,9 +1456,9 @@ app.post('/api/documents/:docId/mindmap', async (req, res) => {
 });
 
 // Generate summary
-app.post('/api/documents/:docId/summary', async (req, res) => {
+app.post('/api/documents/:docId/summary', requireAuth, requireDocAccess, async (req, res) => {
   try {
-    const doc = documents.get(req.params.docId);
+    const doc = await loadDocument(req.params.docId);
     if (!doc) {
       return res.status(404).json({ error: 'Document not found' });
     }
@@ -1496,9 +1496,9 @@ app.post('/api/documents/:docId/summary', async (req, res) => {
 });
 
 // Generate flashcards
-app.post('/api/documents/:docId/flashcards', async (req, res) => {
+app.post('/api/documents/:docId/flashcards', requireAuth, requireDocAccess, async (req, res) => {
   try {
-    const doc = documents.get(req.params.docId);
+    const doc = await loadDocument(req.params.docId);
     if (!doc) {
       return res.status(404).json({ error: 'Document not found' });
     }
@@ -1536,12 +1536,8 @@ app.post('/api/documents/:docId/flashcards', async (req, res) => {
 });
 
 // Export flashcards as CSV
-app.get('/api/documents/:docId/flashcards/export', async (req, res) => {
+app.get('/api/documents/:docId/flashcards/export', requireAuth, requireDocAccess, async (req, res) => {
   try {
-    const doc = documents.get(req.params.docId);
-    if (!doc) {
-      return res.status(404).json({ error: 'Document not found' });
-    }
 
     // We get flashcards from the session storage
     const session = getDocumentSession(req.params.docId, 'flashcards');
@@ -1569,7 +1565,7 @@ app.get('/api/documents/:docId/flashcards/export', async (req, res) => {
 });
 
 // Get due flashcards for SRS
-app.get('/api/documents/:docId/flashcards/due', requireAuth, (req, res) => {
+app.get('/api/documents/:docId/flashcards/due', requireAuth, requireDocAccess, (req, res) => {
   try {
     const dueCards = getDueFlashcards(req.user.id, req.params.docId);
     res.json({ dueCards });
@@ -1580,7 +1576,7 @@ app.get('/api/documents/:docId/flashcards/due', requireAuth, (req, res) => {
 });
 
 // Review a flashcard (SRS)
-app.post('/api/documents/:docId/flashcards/:cardIdx/review', requireAuth, (req, res) => {
+app.post('/api/documents/:docId/flashcards/:cardIdx/review', requireAuth, requireDocAccess, (req, res) => {
   try {
     const { difficulty, timeElapsedMs } = req.body;
     if (!['easy', 'good', 'hard', 'again'].includes(difficulty)) {
@@ -1601,9 +1597,9 @@ app.post('/api/documents/:docId/flashcards/:cardIdx/review', requireAuth, (req, 
 });
 
 // Generate quiz
-app.post('/api/documents/:docId/quiz', async (req, res) => {
+app.post('/api/documents/:docId/quiz', requireAuth, requireDocAccess, async (req, res) => {
   try {
-    const doc = documents.get(req.params.docId);
+    const doc = await loadDocument(req.params.docId);
     if (!doc) {
       return res.status(404).json({ error: 'Document not found' });
     }
@@ -1624,8 +1620,8 @@ app.post('/api/documents/:docId/quiz', async (req, res) => {
     }
     
     // Create notification for the document owner
-    const doc_data = documents.get(req.params.docId);
-    if (doc_data && doc_data.owner_id) {
+    const doc_data = doc;
+    if (doc_data.owner_id) {
       const template = getNotificationTemplate(NOTIFICATION_TYPES.QUIZ_READY, doc_data.fileName);
       if (template) {
         createNotification(doc_data.owner_id, NOTIFICATION_TYPES.QUIZ_READY, template.title, template.message, {
@@ -1645,17 +1641,11 @@ app.post('/api/documents/:docId/quiz', async (req, res) => {
 });
 
 // Chat with document (plan-based message limit per document)
-app.post('/api/documents/:docId/chat', requireAuth, async (req, res) => {
+app.post('/api/documents/:docId/chat', requireAuth, requireDocAccess, async (req, res) => {
   try {
     const docId = req.params.docId;
 
-    // Verify ownership first
-    const accessCheck = verifyDocumentAccess(docId, req.user.id, req.user.role);
-    if (!accessCheck.allowed) {
-      return res.status(accessCheck.status).json({ error: accessCheck.message });
-    }
-
-    const doc = documents.get(docId);
+    const doc = await loadDocument(docId);
     if (!doc) {
       return res.status(404).json({ error: 'Document not found' });
     }
@@ -1722,8 +1712,15 @@ app.post('/api/chat/multi', requireAuth, async (req, res) => {
 
     // Verify all docs exist and are ready
     const docsToChat = [];
+    if (docIds.length > 10) {
+      return res.status(400).json({ error: 'Too many documents (max 10)' });
+    }
     for (const id of docIds) {
-      const doc = documents.get(id);
+      const access = verifyDocumentAccess(id, req.user.id, req.user.role);
+      if (!access.allowed) {
+        return res.status(access.status).json({ error: access.message });
+      }
+      const doc = await loadDocument(id);
       if (!doc) {
         return res.status(404).json({ error: `Document ${id} not found` });
       }
@@ -1774,37 +1771,6 @@ app.get('/api/rate-limit', optionalAuth, (req, res) => {
   });
 });
 
-// ── Maintenance mode middleware ──
-const DB_MAIN_PATH = path.join(__dirname, 'data', 'notemind.db');
-app.use('/api', (req, res, next) => {
-  // Always allow these paths through (req.path is relative to /api mount)
-  const bypass = ['/system/settings', '/auth', '/login', '/register', '/me'];
-  if (bypass.some(p => req.path.startsWith(p)) || req.path.includes('/admin') || req.path.includes('/track-login')) return next();
-
-  try {
-    const db = new Database(DB_MAIN_PATH);
-    const row = db.prepare("SELECT value FROM system_settings WHERE key = 'maintenance_mode'").get();
-    db.close();
-    if (row) {
-      const enabled = JSON.parse(row.value);
-      if (enabled) {
-        // Allow admin users through (check req.user or decode token)
-        if (req.user && req.user.role === 'admin') return next();
-        try {
-          const authHeader = req.headers.authorization;
-          if (authHeader) {
-            const token = authHeader.split(' ')[1];
-            const decoded = jwt.verify(token, process.env.JWT_SECRET);
-            if (decoded.role === 'admin') return next();
-          }
-        } catch { }
-        return res.status(503).json({ error: 'maintenance', message: 'Hệ thống đang bảo trì. Vui lòng quay lại sau.' });
-      }
-    }
-  } catch { }
-  next();
-});
-
 // Feature routes - all advanced features (chat history, favorites, tags, search, analytics, sharing, spaced repetition, exports, sync, preferences)
 app.use('/api', featureRoutes);
 
@@ -1816,10 +1782,8 @@ app.get('/api/notifications/stream', (req, res) => {
   const token = req.query.token;
   if (!token) return res.status(401).json({ error: 'Token required' });
   
-  let decoded;
-  try {
-    decoded = jwt.verify(token, process.env.JWT_SECRET);
-  } catch {
+  const decoded = verifyToken(token);
+  if (!decoded || getUserById(decoded.id)?.isBanned !== false) {
     return res.status(401).json({ error: 'Invalid token' });
   }
   
@@ -2001,33 +1965,11 @@ async function resolveSharedDocument(shareToken) {
 
   const docId = share.document_id;
 
-  // Try in-memory first
-  const memDoc = documents.get(docId);
-  if (memDoc && memDoc.text && memDoc.status === 'ready') {
-    return { share, doc: memDoc };
-  }
-
-  // Fall back to DB file_path + re-process
-  const db = new Database(DB_PATH);
-  const dbDoc = db.prepare('SELECT file_path, original_name, status FROM documents WHERE id = ?').get(docId);
-  db.close();
-
-  if (!dbDoc || !dbDoc.file_path || !fs.existsSync(dbDoc.file_path)) {
+  const doc = await loadDocument(docId);
+  if (!doc || doc.status !== 'ready') {
     return { error: 'Tài liệu không còn tồn tại hoặc đã hết hạn', status: 404 };
   }
-
-  // Re-process the document to get text
-  const text = await processDocument(dbDoc.file_path);
-  const rebuilt = {
-    id: docId,
-    fileName: dbDoc.original_name,
-    filePath: dbDoc.file_path,
-    text,
-    status: 'ready',
-    createdAt: new Date().toISOString()
-  };
-  documents.set(docId, rebuilt);
-  return { share, doc: rebuilt };
+  return { share, doc };
 }
 
 // ── SSE endpoint: live updates for shared document viewers ──
@@ -2226,14 +2168,12 @@ app.post('/api/shared/:shareToken/chat', async (req, res) => {
 // Public user profile
 app.get('/api/users/profile/:username', async (req, res) => {
   try {
-    const db = new Database(DB_PATH);
     const user = db.prepare(`
       SELECT id, username, display_name, avatar_url, plan, role, created_at, last_login_at, presence_status, presence_visible, show_plan_badge
       FROM users WHERE username = ? AND is_banned = 0
     `).get(req.params.username);
 
     if (!user) {
-      db.close();
       return res.status(404).json({ error: 'Người dùng không tồn tại' });
     }
 
@@ -2262,7 +2202,6 @@ app.get('/api/users/profile/:username', async (req, res) => {
       ORDER BY created_at DESC LIMIT 10
     `).all(user.id);
 
-    db.close();
 
     const ONLINE_WINDOW_MS = 60 * 1000;
     const toUtcMs = (value) => {
@@ -2317,22 +2256,20 @@ app.get('/api/users/profile/:username', async (req, res) => {
 
 app.get('/api/community/documents', async (req, res) => {
   try {
-    const db = new Database(DB_PATH);
-    const limit = parseInt(req.query.limit) || 20;
-    const page = parseInt(req.query.page) || 1;
+    const limit = Math.min(Math.max(parseInt(req.query.limit) || 20, 1), 50);
+    const page = Math.max(parseInt(req.query.page) || 1, 1);
     const offset = (page - 1) * limit;
 
     const query = `
       SELECT d.id, d.original_name as title, d.created_at, u.display_name as author, u.username as author_username, u.avatar_url as author_avatar
       FROM documents d
       JOIN users u ON d.user_id = u.id
-      WHERE d.is_public = 1 AND d.status = 'ready'
+      WHERE d.is_public = 1 AND d.status = 'ready' AND d.deleted_at IS NULL AND u.is_banned = 0
       ORDER BY d.created_at DESC
       LIMIT ? OFFSET ?
     `;
 
     const publicDocs = db.prepare(query).all(limit, offset);
-    db.close();
 
     res.json({ documents: publicDocs });
   } catch (error) {
@@ -2344,33 +2281,17 @@ app.get('/api/community/documents', async (req, res) => {
 // Fetch a single public document's content and sessions
 app.get('/api/public/documents/:id/content', async (req, res) => {
   try {
-    const db = new Database(DB_PATH);
-    const docQuery = db.prepare('SELECT * FROM documents WHERE id = ? AND is_public = 1').get(req.params.id);
-    db.close();
+    const docQuery = db.prepare('SELECT id, original_name, status FROM documents WHERE id = ? AND is_public = 1 AND deleted_at IS NULL').get(req.params.id);
 
     if (!docQuery) {
       return res.status(404).json({ error: 'Tài liệu không tồn tại hoặc không được chia sẻ công khai.' });
     }
 
-    // Extract text
     let docText = '';
-    const memDoc = documents.get(docQuery.id);
-    if (memDoc && memDoc.text) {
-      docText = memDoc.text;
-    } else if (docQuery.file_path && fs.existsSync(docQuery.file_path)) {
-      try {
-        docText = await processDocument(docQuery.file_path);
-        documents.set(docQuery.id, {
-          id: docQuery.id,
-          fileName: docQuery.original_name,
-          filePath: docQuery.file_path,
-          text: docText,
-          status: 'ready',
-          createdAt: new Date().toISOString()
-        });
-      } catch (e) {
-        console.error('Failed to process public document text:', e.message);
-      }
+    try {
+      docText = (await loadDocument(docQuery.id))?.text || '';
+    } catch (e) {
+      console.error('Failed to process public document text:', e.message);
     }
 
     // Load pre-existing session data
@@ -2399,30 +2320,26 @@ app.put('/api/documents/:id/public', requireAuth, async (req, res) => {
     const { id } = req.params;
     const { is_public } = req.body;
 
-    const db = new Database(DB_PATH);
-    const docInfo = db.prepare('SELECT user_id, file_name FROM documents WHERE id = ?').get(id);
+    const docInfo = db.prepare('SELECT user_id, original_name, deleted_at FROM documents WHERE id = ?').get(id);
 
-    if (!docInfo) {
-      db.close();
+    if (!docInfo || docInfo.deleted_at) {
       return res.status(404).json({ error: 'Document not found' });
     }
 
     if (docInfo.user_id !== req.user.id) {
-      db.close();
       return res.status(403).json({ error: 'Forbidden' });
     }
 
     db.prepare('UPDATE documents SET is_public = ? WHERE id = ?').run(is_public ? 1 : 0, id);
-    db.close();
 
     // Create notification when document is published
     if (is_public) {
-      const template = getNotificationTemplate(NOTIFICATION_TYPES.DOCUMENT_PUBLISHED, docInfo.file_name);
+      const template = getNotificationTemplate(NOTIFICATION_TYPES.DOCUMENT_PUBLISHED, docInfo.original_name);
       if (template) {
         createNotification(req.user.id, NOTIFICATION_TYPES.DOCUMENT_PUBLISHED, template.title, template.message, {
           actionUrl: `/documents/${id}`,
           icon: template.icon || 'globe',
-          data: { docId: id, fileName: docInfo.file_name },
+          data: { docId: id, fileName: docInfo.original_name },
         });
         broadcastNotifEvent(req.user.id, 'new_notification', { type: 'document_published', title: template.title });
       }
@@ -2440,8 +2357,7 @@ app.put('/api/documents/:id/public', requireAuth, async (req, res) => {
 // Get user analytics and metrics
 app.get('/api/analytics', requireAuth, (req, res) => {
   try {
-    const db = new Database(DB_PATH);
-    const days = parseInt(req.query.days) || 7;
+    const days = Math.min(Math.max(parseInt(req.query.days) || 7, 1), 365);
 
     // Total documents viewed / created
     const docs = db.prepare('SELECT COUNT(*) as count FROM documents WHERE user_id = ? AND status = ?').get(req.user.id, 'ready');
@@ -2449,8 +2365,8 @@ app.get('/api/analytics', requireAuth, (req, res) => {
     // For interactions, we can use the activity_logs table if it exists, otherwise we'll estimate from chat history and flashcard reviews.
     // Let's create an aggregated view based on existing tables
 
-    const chats = db.prepare('SELECT COUNT(*) as count FROM chat_history WHERE user_id = ? AND timestamp >= datetime("now", ?)').get(req.user.id, `-${days} days`);
-    const flashcards = db.prepare('SELECT COUNT(*) as count FROM flashcard_reviews WHERE user_id = ? AND review_date >= datetime("now", ?)').get(req.user.id, `-${days} days`);
+    const chats = db.prepare("SELECT COUNT(*) as count FROM chat_history WHERE user_id = ? AND timestamp >= datetime('now', ?)").get(req.user.id, `-${days} days`);
+    const flashcards = db.prepare("SELECT COUNT(*) as count FROM flashcard_reviews WHERE user_id = ? AND review_date >= datetime('now', ?)").get(req.user.id, `-${days} days`);
 
     // Top documents by chat interactions
     const topDocuments = db.prepare(`
@@ -2472,7 +2388,6 @@ app.get('/api/analytics', requireAuth, (req, res) => {
       ORDER BY date(timestamp) ASC
     `).all(req.user.id, `-${days} days`);
 
-    db.close();
 
     res.json({
       documentsViewed: docs.count || 0,
@@ -2516,7 +2431,6 @@ setTimeout(() => {
 // ── Auto-cleanup: soft-delete documents older than 7 days, purge files for deleted docs ──
 function runDocumentCleanup() {
   try {
-    const db = new Database(DB_PATH);
 
     // 1. Soft-delete: mark documents older than 7 days that haven't been deleted yet
     const softDeleted = db.prepare(`
@@ -2558,7 +2472,6 @@ function runDocumentCleanup() {
       }
     }
 
-    db.close();
   } catch (err) {
     console.error('[Cleanup] Error:', err.message);
   }
@@ -2630,11 +2543,11 @@ app.get('/api/payment/prices', (req, res) => {
 });
 
 // SePay PG IPN (Instant Payment Notification) — hosted checkout flow
-app.post('/api/payment/ipn/sepay', express.json(), (req, res) => {
+app.post('/api/payment/ipn/sepay', async (req, res) => {
   try {
     logger.info(`[Payment] IPN received from ${req.ip}, body: ${JSON.stringify(req.body).substring(0, 500)}`);
 
-    const result = processSePayPgIPN(req.body);
+    const result = await processSePayPgIPN(req.body);
     logger.info('[Payment] IPN processed:', result);
 
     // SePay PG expects 200 OK
@@ -2646,13 +2559,13 @@ app.post('/api/payment/ipn/sepay', express.json(), (req, res) => {
 });
 
 // SePay webhook (legacy bank transfer flow)
-app.post('/api/payment/webhook/sepay', express.json(), (req, res) => {
+app.post('/api/payment/webhook/sepay', (req, res) => {
   try {
     const authHeader = req.headers['authorization'] || '';
-    logger.info(`[Payment] Webhook received from ${req.ip}, auth: "${authHeader.substring(0, 20)}...", body keys: ${Object.keys(req.body || {}).join(',')}`);
+    logger.info(`[Payment] Webhook received from ${req.ip}, body keys: ${Object.keys(req.body || {}).join(',')}`);
 
     if (!verifySepayWebhook(authHeader)) {
-      logger.warn(`[Payment] Invalid webhook API key. Header: "${authHeader.substring(0, 30)}"`);
+      logger.warn('[Payment] Invalid webhook API key');
       return res.status(401).json({ error: 'Unauthorized' });
     }
 
@@ -2669,7 +2582,7 @@ app.post('/api/payment/webhook/sepay', express.json(), (req, res) => {
 // Admin: get recent payments
 app.get('/api/admin/payments', requireAuth, requireAdmin, (req, res) => {
   try {
-    const payments = getRecentPayments(Number(req.query.limit) || 50);
+    const payments = getRecentPayments(Math.min(Number(req.query.limit) || 50, 500));
     res.json({ payments });
   } catch (error) {
     res.status(500).json({ error: error.message });

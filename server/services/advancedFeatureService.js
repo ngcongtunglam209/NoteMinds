@@ -1,11 +1,7 @@
-import Database from 'better-sqlite3';
-import path from 'path';
-import { fileURLToPath } from 'url';
 import { v4 as uuidv4 } from 'uuid';
 import crypto from 'crypto';
+import db from './database.js';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const DB_PATH = path.join(__dirname, '../data/notemind.db');
 
 /**
  * Search Service - Full-text search across documents and conversations
@@ -13,7 +9,6 @@ const DB_PATH = path.join(__dirname, '../data/notemind.db');
 
 export function indexDocument(userId, documentId, contentType, searchableText) {
   try {
-    const db = new Database(DB_PATH);
 
     const existingIndex = db.prepare(`
       SELECT id FROM search_index 
@@ -33,7 +28,6 @@ export function indexDocument(userId, documentId, contentType, searchableText) {
       `).run(uuidv4(), documentId, userId, contentType, searchableText);
     }
 
-    db.close();
     return { success: true };
   } catch (error) {
     console.error('[Search] Error indexing:', error.message);
@@ -43,7 +37,6 @@ export function indexDocument(userId, documentId, contentType, searchableText) {
 
 export function searchDocuments(userId, query, limit = 20) {
   try {
-    const db = new Database(DB_PATH);
 
     const searchTerm = `%${query}%`;
 
@@ -59,7 +52,6 @@ export function searchDocuments(userId, query, limit = 20) {
       LIMIT ?
     `).all(searchTerm, userId, searchTerm, limit);
 
-    db.close();
     return results;
   } catch (error) {
     console.error('[Search] Error searching:', error.message);
@@ -69,7 +61,6 @@ export function searchDocuments(userId, query, limit = 20) {
 
 export function searchConversations(userId, query, limit = 20) {
   try {
-    const db = new Database(DB_PATH);
 
     const searchTerm = `%${query}%`;
 
@@ -89,7 +80,6 @@ export function searchConversations(userId, query, limit = 20) {
       LIMIT ?
     `).all(searchTerm, userId, searchTerm, searchTerm, limit);
 
-    db.close();
     return results;
   } catch (error) {
     console.error('[Search] Error searching conversations:', error.message);
@@ -103,7 +93,6 @@ export function searchConversations(userId, query, limit = 20) {
 
 export function createShareLink(documentId, ownerId, shareType = 'view', expiresInDays = null) {
   try {
-    const db = new Database(DB_PATH);
     const shareToken = crypto.randomBytes(32).toString('hex');
     const expiresAt = expiresInDays ? new Date(Date.now() + expiresInDays * 24 * 60 * 60 * 1000).toISOString() : null;
 
@@ -112,7 +101,6 @@ export function createShareLink(documentId, ownerId, shareType = 'view', expires
       VALUES (?, ?, ?, ?, ?, ?)
     `).run(uuidv4(), documentId, ownerId, shareToken, shareType, expiresAt);
 
-    db.close();
 
     return {
       success: true,
@@ -128,7 +116,6 @@ export function createShareLink(documentId, ownerId, shareType = 'view', expires
 
 export function validateShareToken(shareToken) {
   try {
-    const db = new Database(DB_PATH);
 
     const share = db.prepare(`
       SELECT sd.id, sd.document_id, sd.owner_id, sd.share_type, sd.expires_at,
@@ -136,7 +123,7 @@ export function validateShareToken(shareToken) {
       FROM shared_documents sd
       LEFT JOIN documents d ON sd.document_id = d.id
       WHERE sd.share_token = ? 
-        AND (sd.expires_at IS NULL OR sd.expires_at > datetime('now'))
+        AND (sd.expires_at IS NULL OR datetime(sd.expires_at) > datetime('now'))
     `).get(shareToken);
 
     if (share) {
@@ -147,7 +134,6 @@ export function validateShareToken(shareToken) {
       `).run(uuidv4(), share.id);
     }
 
-    db.close();
     return share || null;
   } catch (error) {
     console.error('[Share] Error validating token:', error.message);
@@ -157,7 +143,6 @@ export function validateShareToken(shareToken) {
 
 export function getSharedDocuments(ownerId, documentId = null) {
   try {
-    const db = new Database(DB_PATH);
 
     let query = `
       SELECT sd.id, sd.document_id, sd.share_token, sd.share_type, 
@@ -180,7 +165,6 @@ export function getSharedDocuments(ownerId, documentId = null) {
 
     const shares = db.prepare(query).all(...params);
 
-    db.close();
     return shares;
   } catch (error) {
     console.error('[Share] Error getting shared:', error.message);
@@ -188,17 +172,11 @@ export function getSharedDocuments(ownerId, documentId = null) {
   }
 }
 
-export function deleteShareLink(shareId) {
+export function deleteShareLink(shareId, ownerId) {
   try {
-    const db = new Database(DB_PATH);
-
-    db.prepare('DELETE FROM shared_access_logs WHERE shared_document_id = ?')
-      .run(shareId);
-    
-    db.prepare('DELETE FROM shared_documents WHERE id = ?')
-      .run(shareId);
-
-    db.close();
+    const { changes } = db.prepare('DELETE FROM shared_documents WHERE id = ? AND owner_id = ?').run(shareId, ownerId);
+    if (changes === 0) return { success: false, error: 'Share not found' };
+    db.prepare('DELETE FROM shared_access_logs WHERE shared_document_id = ?').run(shareId);
     return { success: true };
   } catch (error) {
     console.error('[Share] Error deleting share:', error.message);
@@ -212,7 +190,6 @@ export function deleteShareLink(shareId) {
 
 export function updateFlashcardMetrics(userId, documentId, flashcardId, qualityGrade, timeMs) {
   try {
-    const db = new Database(DB_PATH);
 
     let metrics = db.prepare(`
       SELECT * FROM flashcard_metrics
@@ -276,7 +253,6 @@ export function updateFlashcardMetrics(userId, documentId, flashcardId, qualityG
       VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
     `).run(uuidv4(), metrics.id, qualityGrade, timeMs);
 
-    db.close();
 
     return {
       success: true,
@@ -293,7 +269,6 @@ export function updateFlashcardMetrics(userId, documentId, flashcardId, qualityG
 
 export function getDueFlashcards(userId, documentId = null, limit = 20) {
   try {
-    const db = new Database(DB_PATH);
 
     let query = `
       SELECT fm.id, fm.flashcard_id, fm.document_id, fm.ease_factor,
@@ -302,7 +277,7 @@ export function getDueFlashcards(userId, documentId = null, limit = 20) {
       FROM flashcard_metrics fm
       LEFT JOIN flashcard_reviews fr ON fm.id = fr.flashcard_metric_id
       WHERE fm.user_id = ? AND 
-            (fm.next_review_date IS NULL OR fm.next_review_date <= datetime('now'))
+            (fm.next_review_date IS NULL OR datetime(fm.next_review_date) <= datetime('now'))
     `;
 
     const params = [userId];
@@ -320,7 +295,6 @@ export function getDueFlashcards(userId, documentId = null, limit = 20) {
     params.push(limit);
 
     const dueCards = db.prepare(query).all(...params);
-    db.close();
 
     return dueCards;
   } catch (error) {
@@ -331,12 +305,11 @@ export function getDueFlashcards(userId, documentId = null, limit = 20) {
 
 export function getFlashcardStats(userId, documentId = null) {
   try {
-    const db = new Database(DB_PATH);
 
     const dueSoon = db.prepare(`
       SELECT COUNT(*) as count
       FROM flashcard_metrics
-      WHERE user_id = ? AND (next_review_date IS NULL OR next_review_date <= datetime('now', '+7 days'))
+      WHERE user_id = ? AND (next_review_date IS NULL OR datetime(next_review_date) <= datetime('now', '+7 days'))
     `).get(userId).count;
 
     const totalCards = db.prepare(`
@@ -359,7 +332,6 @@ export function getFlashcardStats(userId, documentId = null) {
       WHERE fm.user_id = ? AND fr.reviewed_at >= datetime('now', '-30 days')
     `).get(userId);
 
-    db.close();
 
     return {
       totalCards,

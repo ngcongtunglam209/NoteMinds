@@ -1,15 +1,13 @@
 import OpenAI from 'openai';
-import Database from 'better-sqlite3';
-import path from 'path';
-import { fileURLToPath } from 'url';
 import './envLoader.js';
+import db from './database.js';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const DB_PATH = path.join(__dirname, '../data/notemind.db');
 
 const client = new OpenAI({
   baseURL: process.env.QWEN_API_BASE_URL || 'http://localhost:11434/v1',
   apiKey: process.env.QWEN_API_KEY || 'ollama',
+  timeout: 120_000,
+  maxRetries: 0, // callWithRetry handles retries
 });
 
 const model = process.env.QWEN_MODEL || 'qwen3';
@@ -17,13 +15,11 @@ const model = process.env.QWEN_MODEL || 'qwen3';
 /** Log AI usage to the database */
 function logAiUsage(userId, action, modelName, usage, latencyMs, success = true, errorMessage = null) {
   try {
-    const db = new Database(DB_PATH);
     db.prepare(`INSERT INTO ai_usage_logs (user_id, action, model, prompt_tokens, completion_tokens, total_tokens, latency_ms, success, error_message) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
       userId || null, action, modelName,
       usage?.prompt_tokens || 0, usage?.completion_tokens || 0, usage?.total_tokens || 0,
       latencyMs, success ? 1 : 0, errorMessage
     );
-    db.close();
   } catch { /* silent */ }
 }
 

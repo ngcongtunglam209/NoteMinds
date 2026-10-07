@@ -1,0 +1,17 @@
+# Keep host artifacts and secrets out of the image (host node_modules would also
+# overwrite the Linux-built native modules on COPY server/ ./)
+**/node_modules
+.git
+.env
+.env.*
+!.env.example
+**/.env
+server/data
+server/uploads
+server/exports
+server/logs
+server/public
+client/dist
+certs
+certbot
+*.log

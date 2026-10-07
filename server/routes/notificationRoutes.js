@@ -107,6 +107,8 @@ router.delete('/:id', requireAuth, (req, res) => {
  */
 router.post('/test', requireAuth, (req, res) => {
   try {
+    // Dev-only: creates fake "plan upgraded" / "security alert" notifications
+    if (process.env.NODE_ENV === 'production') return res.sendStatus(404);
     const userId = req.user.id;
 
     const samples = [

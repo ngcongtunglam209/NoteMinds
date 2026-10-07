@@ -1,19 +1,13 @@
 import cron from 'node-cron';
-import Database from 'better-sqlite3';
-import path from 'path';
 import fs from 'fs';
-import { fileURLToPath } from 'url';
+import db from './database.js';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const DB_PATH = path.join(__dirname, '..', 'data', 'notemind.db');
 
 export function initDocumentCleanup(uploadsDir) {
     // Run every night at 2:00 AM
     cron.schedule('0 2 * * *', () => {
         console.log('[Cleanup] Starting 7-day document cleanup job...');
         try {
-            const db = new Database(DB_PATH);
 
             // Find documents older than 7 days
             // SQLite DateTime modifier '-7 days'
@@ -24,7 +18,6 @@ export function initDocumentCleanup(uploadsDir) {
 
             if (oldDocs.length === 0) {
                 console.log('[Cleanup] No documents older than 7 days found.');
-                db.close();
                 return;
             }
 
@@ -53,7 +46,6 @@ export function initDocumentCleanup(uploadsDir) {
             }
 
             console.log(`[Cleanup] Successfully deleted ${deletedCount} documents.`);
-            db.close();
         } catch (err) {
             console.error('[Cleanup] Error running cleanup job:', err.message);
         }

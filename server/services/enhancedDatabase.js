@@ -1,9 +1,6 @@
 import Database from 'better-sqlite3';
-import path from 'path';
-import { fileURLToPath } from 'url';
+import db from './database.js';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const DB_PATH = path.join(__dirname, '../data/notemind.db');
 
 /**
  * Initialize enhanced database tables for all features
@@ -18,7 +15,6 @@ const DB_PATH = path.join(__dirname, '../data/notemind.db');
  */
 export function initializeEnhancedTables() {
   try {
-    const db = new Database(DB_PATH);
 
     console.log('[Database] Creating enhanced feature tables...');
 
@@ -780,7 +776,6 @@ export function initializeEnhancedTables() {
     console.log('  ✓ Email blasts table created');
 
     console.log('[Database] ✓ All v3 admin feature tables initialized');
-    db.close();
     return true;
 
   } catch (error) {

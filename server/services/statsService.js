@@ -1,12 +1,7 @@
-import Database from 'better-sqlite3';
-import path from 'path';
-import { fileURLToPath } from 'url';
+import db from './database.js';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const DB_PATH = path.join(__dirname, '../data/notemind.db');
 
 export function getLeaderboard(period = 'all') {
-    const db = new Database(DB_PATH);
 
     let dateFilter = '';
     if (period === 'week') {
@@ -41,12 +36,10 @@ export function getLeaderboard(period = 'all') {
   `;
 
     const leaderboard = db.prepare(query).all();
-    db.close();
     return leaderboard;
 }
 
 export function getUserGoals(userId) {
-    const db = new Database(DB_PATH);
 
     // Get goals
     let goals = db.prepare('SELECT * FROM user_goals WHERE user_id = ?').get(userId);
@@ -74,7 +67,6 @@ export function getUserGoals(userId) {
         todayActivity = { flashcards_reviewed: 0, quizzes_completed: 0, documents_uploaded: 0, chat_messages: 0, study_minutes: 0 };
     }
 
-    db.close();
 
     return {
         goals,
@@ -84,7 +76,6 @@ export function getUserGoals(userId) {
 }
 
 export function updateUserGoals(userId, { daily_flashcards, daily_quizzes, daily_documents }) {
-    const db = new Database(DB_PATH);
 
     // Ensure goals exist
     const existing = db.prepare('SELECT id FROM user_goals WHERE user_id = ?').get(userId);
@@ -102,24 +93,20 @@ export function updateUserGoals(userId, { daily_flashcards, daily_quizzes, daily
   `).run(daily_flashcards, daily_quizzes, daily_documents, userId);
 
     const updatedGoals = db.prepare('SELECT * FROM user_goals WHERE user_id = ?').get(userId);
-    db.close();
     return { goals: updatedGoals };
 }
 
 export function getActivityHistory(userId, days = 30) {
-    const db = new Database(DB_PATH);
     const data = db.prepare(`
     SELECT * FROM daily_activity 
     WHERE user_id = ? AND activity_date >= date('now', '-' || ? || ' days')
     ORDER BY activity_date DESC
   `).all(userId, days);
-    db.close();
     return data;
 }
 
 export function logActivity(userId, activityType, count = 1) {
     try {
-        const db = new Database(DB_PATH);
         const today = new Date().toISOString().split('T')[0];
 
         // Ensure daily activity record exists
@@ -169,7 +156,6 @@ export function logActivity(userId, activityType, count = 1) {
         `).run(newStreak, longestStreak, today, userId);
             }
         }
-        db.close();
     } catch (error) {
         console.error('[ActivityLog] Error:', error.message);
     }

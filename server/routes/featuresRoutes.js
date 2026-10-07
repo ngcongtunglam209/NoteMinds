@@ -1,6 +1,5 @@
 ﻿import express from 'express';
 import { v4 as uuidv4 } from 'uuid';
-import Database from 'better-sqlite3';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { requireAuth, requireAdmin, optionalAuth } from '../services/authService.js';
@@ -12,11 +11,24 @@ import { logActivity } from '../services/statsService.js';
 import { buildSystemPrompt, normalizeLanguage } from '../services/promptBuilder.js';
 import os from 'os';
 import fs from 'fs';
+import db from '../services/database.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const DB_PATH = path.join(__dirname, '../data/notemind.db');
 
 const router = express.Router();
+
+// Ownership guards (admins bypass, same as verifyDocumentAccess in index.js)
+const ownsDocument = (docId, user) => user.role === 'admin'
+  || !!db.prepare('SELECT 1 FROM documents WHERE id = ? AND user_id = ? AND deleted_at IS NULL').get(docId, user.id);
+const ownsConversation = (convId, user) => user.role === 'admin'
+  || !!db.prepare('SELECT 1 FROM conversations WHERE id = ? AND user_id = ?').get(convId, user.id);
+
+// CSV cell: quote, double inner quotes, and neutralise spreadsheet formulas
+const csvCell = (v) => {
+  let s = String(v ?? '');
+  if (/^[=+\-@\t\r]/.test(s)) s = `'${s}`;
+  return `"${s.replace(/"/g, '""')}"`;
+};
 
 // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // CONVERSATIONS (Chat History)
@@ -52,6 +64,7 @@ router.get('/conversations/:documentId/history', requireAuth, (req, res) => {
 
 router.get('/conversation/:conversationId', requireAuth, (req, res) => {
   try {
+    if (!ownsConversation(req.params.conversationId, req.user)) return res.status(404).json({ error: 'Not found' });
     const messages = featureService.getConversationMessages(req.params.conversationId);
     res.json({ messages });
   } catch (error) {
@@ -63,6 +76,8 @@ router.get('/conversation/:conversationId', requireAuth, (req, res) => {
 router.post('/conversation/save', requireAuth, (req, res) => {
   try {
     const { documentId, messages, title } = req.body;
+    if (!Array.isArray(messages) || messages.length > 200) return res.status(400).json({ error: 'Invalid messages' });
+    if (documentId && !ownsDocument(documentId, req.user)) return res.status(404).json({ error: 'Document not found' });
     const result = featureService.saveConversation(req.user.id, documentId, messages, title);
 
     if (result.success) {
@@ -79,6 +94,7 @@ router.post('/conversation/save', requireAuth, (req, res) => {
 
 router.post('/conversation/:conversationId/message', requireAuth, (req, res) => {
   try {
+    if (!ownsConversation(req.params.conversationId, req.user)) return res.status(404).json({ error: 'Not found' });
     const { role, message } = req.body;
     const result = featureService.addMessageToConversation(req.params.conversationId, role, message);
 
@@ -95,6 +111,7 @@ router.post('/conversation/:conversationId/message', requireAuth, (req, res) => 
 
 router.delete('/conversation/:conversationId', requireAuth, (req, res) => {
   try {
+    if (!ownsConversation(req.params.conversationId, req.user)) return res.status(404).json({ error: 'Not found' });
     const result = featureService.deleteConversation(req.params.conversationId);
     logAnalytic(req.user.id, 'delete_conversation');
     res.json(result);
@@ -164,6 +181,8 @@ router.post('/tags', requireAuth, (req, res) => {
 
 router.post('/documents/:documentId/tags/:tagId', requireAuth, (req, res) => {
   try {
+    if (!ownsDocument(req.params.documentId, req.user)) return res.status(404).json({ error: 'Document not found' });
+    if (!db.prepare('SELECT 1 FROM tags WHERE id = ? AND user_id = ?').get(req.params.tagId, req.user.id)) return res.status(404).json({ error: 'Tag not found' });
     const result = featureService.addTagToDocument(req.params.documentId, req.params.tagId);
     logAnalytic(req.user.id, 'add_tag', req.params.documentId);
     res.json(result);
@@ -174,6 +193,7 @@ router.post('/documents/:documentId/tags/:tagId', requireAuth, (req, res) => {
 
 router.delete('/documents/:documentId/tags/:tagId', requireAuth, (req, res) => {
   try {
+    if (!ownsDocument(req.params.documentId, req.user)) return res.status(404).json({ error: 'Document not found' });
     const result = featureService.removeTagFromDocument(req.params.documentId, req.params.tagId);
     res.json(result);
   } catch (error) {
@@ -183,6 +203,7 @@ router.delete('/documents/:documentId/tags/:tagId', requireAuth, (req, res) => {
 
 router.get('/documents/:documentId/tags', requireAuth, (req, res) => {
   try {
+    if (!ownsDocument(req.params.documentId, req.user)) return res.status(404).json({ error: 'Document not found' });
     const tags = featureService.getDocumentTags(req.params.documentId);
     res.json({ tags });
   } catch (error) {
@@ -294,11 +315,14 @@ router.get('/analytics', requireAuth, (req, res) => {
 router.post('/share/:documentId', requireAuth, (req, res) => {
   try {
     const { shareType = 'view', expiresIn } = req.body;
+    if (!ownsDocument(req.params.documentId, req.user)) return res.status(404).json({ error: 'Document not found' });
+    if (!['view', 'comment', 'edit'].includes(shareType)) return res.status(400).json({ error: 'Invalid share type' });
+    const days = expiresIn == null ? null : Math.min(Math.max(parseInt(expiresIn) || 1, 1), 365);
     const result = advancedFeatureService.createShareLink(
       req.params.documentId,
       req.user.id,
       shareType,
-      expiresIn
+      days
     );
 
     if (result.success) {
@@ -343,7 +367,7 @@ router.get('/shares', requireAuth, (req, res) => {
 
 router.delete('/shares/:shareId', requireAuth, (req, res) => {
   try {
-    const result = advancedFeatureService.deleteShareLink(req.params.shareId);
+    const result = advancedFeatureService.deleteShareLink(req.params.shareId, req.user.id);
     logAnalytic(req.user.id, 'delete_share');
     res.json(result);
   } catch (error) {
@@ -361,7 +385,7 @@ router.get('/flashcards/due', requireAuth, (req, res) => {
     const cards = advancedFeatureService.getDueFlashcards(
       req.user.id,
       documentId,
-      parseInt(limit)
+      Math.min(Math.max(parseInt(limit) || 20, 1), 100)
     );
     res.json({ dueCards: cards });
   } catch (error) {
@@ -372,6 +396,8 @@ router.get('/flashcards/due', requireAuth, (req, res) => {
 router.post('/flashcards/:flashcardId/review', requireAuth, (req, res) => {
   try {
     const { documentId, qualityGrade, timeMs } = req.body;
+    if (!Number.isInteger(qualityGrade) || qualityGrade < 0 || qualityGrade > 5) return res.status(400).json({ error: 'Invalid quality grade' });
+    if (!ownsDocument(documentId, req.user)) return res.status(404).json({ error: 'Document not found' });
     const result = advancedFeatureService.updateFlashcardMetrics(
       req.user.id,
       documentId,
@@ -405,6 +431,7 @@ router.get('/flashcards/stats', requireAuth, (req, res) => {
 
 router.post('/export/flashcards/:documentId', requireAuth, (req, res) => {
   try {
+    if (!ownsDocument(req.params.documentId, req.user)) return res.status(404).json({ error: 'Document not found' });
     const result = syncExportService.exportFlashcardsAsCSV(req.params.documentId, req.user.id);
     if (result.success) {
       logAnalytic(req.user.id, 'export_flashcards', req.params.documentId);
@@ -417,16 +444,16 @@ router.post('/export/flashcards/:documentId', requireAuth, (req, res) => {
   }
 });
 
-router.post('/export/conversation/:conversationId', requireAuth, (req, res) => {
+router.post('/export/conversation/:conversationId', requireAuth, async (req, res) => {
   try {
-    syncExportService.exportConversationAsPDF(req.params.conversationId).then(result => {
-      if (result.success) {
-        logAnalytic(req.user.id, 'export_conversation');
-        res.json(result);
-      } else {
-        res.status(400).json({ error: result.error });
-      }
-    });
+    if (!ownsConversation(req.params.conversationId, req.user)) return res.status(404).json({ error: 'Not found' });
+    const result = await syncExportService.exportConversationAsPDF(req.params.conversationId);
+    if (result.success) {
+      logAnalytic(req.user.id, 'export_conversation');
+      res.json(result);
+    } else {
+      res.status(400).json({ error: result.error });
+    }
   } catch (error) {
     res.status(500).json({ error: 'Export failed' });
   }
@@ -493,9 +520,7 @@ router.post('/sync/mark/:syncId', requireAuth, (req, res) => {
 
 router.get('/documents/:docId/notes', requireAuth, (req, res) => {
   try {
-    const db = new Database(DB_PATH);
     const notes = db.prepare('SELECT * FROM document_notes WHERE document_id = ? AND user_id = ? ORDER BY created_at DESC').all(req.params.docId, req.user.id);
-    db.close();
     res.json({ notes });
   } catch (error) { res.status(500).json({ error: 'Failed to get notes' }); }
 });
@@ -505,10 +530,8 @@ router.post('/documents/:docId/notes', requireAuth, (req, res) => {
     const { content, color } = req.body;
     if (!content) return res.status(400).json({ error: 'Content is required' });
     const id = uuidv4();
-    const db = new Database(DB_PATH);
     db.prepare('INSERT INTO document_notes (id, document_id, user_id, content, color) VALUES (?, ?, ?, ?, ?)').run(id, req.params.docId, req.user.id, content, color || '#fbbf24');
     const note = db.prepare('SELECT * FROM document_notes WHERE id = ?').get(id);
-    db.close();
     res.json({ note });
   } catch (error) { res.status(500).json({ error: 'Failed to create note' }); }
 });
@@ -516,21 +539,17 @@ router.post('/documents/:docId/notes', requireAuth, (req, res) => {
 router.put('/notes/:noteId', requireAuth, (req, res) => {
   try {
     const { content, color } = req.body;
-    const db = new Database(DB_PATH);
     const existing = db.prepare('SELECT * FROM document_notes WHERE id = ? AND user_id = ?').get(req.params.noteId, req.user.id);
-    if (!existing) { db.close(); return res.status(404).json({ error: 'Note not found' }); }
+    if (!existing) { return res.status(404).json({ error: 'Note not found' }); }
     db.prepare('UPDATE document_notes SET content = COALESCE(?, content), color = COALESCE(?, color), updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(content, color, req.params.noteId);
     const updated = db.prepare('SELECT * FROM document_notes WHERE id = ?').get(req.params.noteId);
-    db.close();
     res.json({ note: updated });
   } catch (error) { res.status(500).json({ error: 'Failed to update note' }); }
 });
 
 router.delete('/notes/:noteId', requireAuth, (req, res) => {
   try {
-    const db = new Database(DB_PATH);
     db.prepare('DELETE FROM document_notes WHERE id = ? AND user_id = ?').run(req.params.noteId, req.user.id);
-    db.close();
     res.json({ success: true });
   } catch (error) { res.status(500).json({ error: 'Failed to delete note' }); }
 });
@@ -541,29 +560,24 @@ router.delete('/notes/:noteId', requireAuth, (req, res) => {
 
 router.post('/community/:docId/like', requireAuth, (req, res) => {
   try {
-    const db = new Database(DB_PATH);
     try {
       db.prepare('INSERT INTO community_likes (document_id, user_id) VALUES (?, ?)').run(req.params.docId, req.user.id);
     } catch (e) { /* already liked — ignore unique constraint */ }
     const count = db.prepare('SELECT COUNT(*) as count FROM community_likes WHERE document_id = ?').get(req.params.docId);
-    db.close();
     res.json({ liked: true, likeCount: count.count });
   } catch (error) { res.status(500).json({ error: 'Failed to like' }); }
 });
 
 router.delete('/community/:docId/like', requireAuth, (req, res) => {
   try {
-    const db = new Database(DB_PATH);
     db.prepare('DELETE FROM community_likes WHERE document_id = ? AND user_id = ?').run(req.params.docId, req.user.id);
     const count = db.prepare('SELECT COUNT(*) as count FROM community_likes WHERE document_id = ?').get(req.params.docId);
-    db.close();
     res.json({ liked: false, likeCount: count.count });
   } catch (error) { res.status(500).json({ error: 'Failed to unlike' }); }
 });
 
 router.get('/community/:docId/likes', (req, res) => {
   try {
-    const db = new Database(DB_PATH);
     const count = db.prepare('SELECT COUNT(*) as count FROM community_likes WHERE document_id = ?').get(req.params.docId);
     let userLiked = false;
     // Check if user logged in has liked
@@ -573,7 +587,6 @@ router.get('/community/:docId/likes', (req, res) => {
         const { optionalAuth } = require('../services/authService.js');
       } catch (e) { }
     }
-    db.close();
     res.json({ likeCount: count.count });
   } catch (error) { res.status(500).json({ error: 'Failed' }); }
 });
@@ -584,7 +597,6 @@ router.get('/community/:docId/likes', (req, res) => {
 
 router.get('/community/:docId/comments', (req, res) => {
   try {
-    const db = new Database(DB_PATH);
     const comments = db.prepare(`
       SELECT c.*, u.display_name as author, u.username, u.avatar_url as author_avatar
       FROM community_comments c
@@ -593,7 +605,6 @@ router.get('/community/:docId/comments', (req, res) => {
       ORDER BY c.created_at DESC
       LIMIT 50
     `).all(req.params.docId);
-    db.close();
     res.json({ comments });
   } catch (error) { res.status(500).json({ error: 'Failed to get comments' }); }
 });
@@ -603,28 +614,24 @@ router.post('/community/:docId/comments', requireAuth, (req, res) => {
     const { content } = req.body;
     if (!content || !content.trim()) return res.status(400).json({ error: 'Nội dung không được để trống' });
     const id = uuidv4();
-    const db = new Database(DB_PATH);
     db.prepare('INSERT INTO community_comments (id, document_id, user_id, content) VALUES (?, ?, ?, ?)').run(id, req.params.docId, req.user.id, content.trim());
     const comment = db.prepare(`
       SELECT c.*, u.display_name as author, u.username, u.avatar_url as author_avatar
       FROM community_comments c JOIN users u ON c.user_id = u.id WHERE c.id = ?
     `).get(id);
-    db.close();
     res.json({ comment });
   } catch (error) { res.status(500).json({ error: 'Failed to post comment' }); }
 });
 
 router.delete('/community/comments/:commentId', requireAuth, (req, res) => {
   try {
-    const db = new Database(DB_PATH);
     // Allow author or admin to delete
     const comment = db.prepare('SELECT * FROM community_comments WHERE id = ?').get(req.params.commentId);
-    if (!comment) { db.close(); return res.status(404).json({ error: 'Comment not found' }); }
+    if (!comment) { return res.status(404).json({ error: 'Comment not found' }); }
     if (comment.user_id !== req.user.id && req.user.role !== 'admin') {
-      db.close(); return res.status(403).json({ error: 'Not authorized' });
+      return res.status(403).json({ error: 'Not authorized' });
     }
     db.prepare('DELETE FROM community_comments WHERE id = ?').run(req.params.commentId);
-    db.close();
     res.json({ success: true });
   } catch (error) { res.status(500).json({ error: 'Failed to delete comment' }); }
 });
@@ -635,7 +642,6 @@ router.delete('/community/comments/:commentId', requireAuth, (req, res) => {
 
 router.get('/goals', requireAuth, (req, res) => {
   try {
-    const db = new Database(DB_PATH);
     let goals = db.prepare('SELECT * FROM user_goals WHERE user_id = ?').get(req.user.id);
     if (!goals) {
       db.prepare('INSERT INTO user_goals (user_id) VALUES (?)').run(req.user.id);
@@ -649,7 +655,6 @@ router.get('/goals', requireAuth, (req, res) => {
     const today = new Date().toISOString().split('T')[0];
     let todayActivity = db.prepare('SELECT * FROM daily_activity WHERE user_id = ? AND activity_date = ?').get(req.user.id, today);
     if (!todayActivity) todayActivity = { flashcards_reviewed: 0, quizzes_completed: 0, documents_uploaded: 0, chat_messages: 0, study_minutes: 0 };
-    db.close();
     res.json({ goals, streak, todayActivity });
   } catch (error) { res.status(500).json({ error: 'Failed to get goals' }); }
 });
@@ -657,13 +662,11 @@ router.get('/goals', requireAuth, (req, res) => {
 router.put('/goals', requireAuth, (req, res) => {
   try {
     const { daily_flashcards, daily_quizzes, daily_documents } = req.body;
-    const db = new Database(DB_PATH);
     db.prepare(`INSERT INTO user_goals (user_id, daily_flashcards, daily_quizzes, daily_documents, updated_at)
       VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
       ON CONFLICT(user_id) DO UPDATE SET daily_flashcards=excluded.daily_flashcards, daily_quizzes=excluded.daily_quizzes, daily_documents=excluded.daily_documents, updated_at=CURRENT_TIMESTAMP
     `).run(req.user.id, daily_flashcards || 20, daily_quizzes || 3, daily_documents || 2);
     const goals = db.prepare('SELECT * FROM user_goals WHERE user_id = ?').get(req.user.id);
-    db.close();
     res.json({ goals });
   } catch (error) { res.status(500).json({ error: 'Failed to update goals' }); }
 });
@@ -672,7 +675,6 @@ router.post('/activity/track', requireAuth, (req, res) => {
   try {
     const { type } = req.body; // 'flashcard' | 'quiz' | 'document' | 'chat' | 'study_minutes'
     const today = new Date().toISOString().split('T')[0];
-    const db = new Database(DB_PATH);
 
     // Upsert daily activity
     db.prepare(`INSERT INTO daily_activity (user_id, activity_date) VALUES (?, ?)
@@ -700,7 +702,6 @@ router.post('/activity/track', requireAuth, (req, res) => {
 
     const activity = db.prepare('SELECT * FROM daily_activity WHERE user_id = ? AND activity_date = ?').get(req.user.id, today);
     const updatedStreak = db.prepare('SELECT * FROM user_streaks WHERE user_id = ?').get(req.user.id);
-    db.close();
     res.json({ activity, streak: updatedStreak });
   } catch (error) { res.status(500).json({ error: 'Failed to track activity' }); }
 });
@@ -708,9 +709,7 @@ router.post('/activity/track', requireAuth, (req, res) => {
 router.get('/activity/history', requireAuth, (req, res) => {
   try {
     const days = parseInt(req.query.days) || 30;
-    const db = new Database(DB_PATH);
     const history = db.prepare(`SELECT * FROM daily_activity WHERE user_id = ? AND activity_date >= date('now', ?) ORDER BY activity_date DESC`).all(req.user.id, `-${days} days`);
-    db.close();
     res.json({ history });
   } catch (error) { res.status(500).json({ error: 'Failed to get activity history' }); }
 });
@@ -722,7 +721,6 @@ router.get('/activity/history', requireAuth, (req, res) => {
 router.get('/leaderboard', (req, res) => {
   try {
     const period = req.query.period || 'all'; // 'week' | 'month' | 'all'
-    const db = new Database(DB_PATH);
 
     let dateFilter = '';
     if (period === 'week') dateFilter = "AND da.activity_date >= date('now', '-7 days')";
@@ -745,7 +743,6 @@ router.get('/leaderboard', (req, res) => {
       ORDER BY total_score DESC
       LIMIT 50
     `).all();
-    db.close();
     res.json({ leaderboard });
   } catch (error) { res.status(500).json({ error: 'Failed to get leaderboard' }); }
 });
@@ -756,7 +753,6 @@ router.get('/leaderboard', (req, res) => {
 
 router.get('/announcements', optionalAuth, (req, res) => {
   try {
-    const db = new Database(DB_PATH);
     const userPlan = req.user ? req.user.plan : null;
     const isLoggedIn = !!req.user;
 
@@ -765,7 +761,7 @@ router.get('/announcements', optionalAuth, (req, res) => {
       SELECT a.*, u.display_name as author_name
       FROM announcements a
       JOIN users u ON a.created_by = u.id
-      WHERE a.is_active = 1 AND (a.expires_at IS NULL OR a.expires_at > datetime('now'))
+      WHERE a.is_active = 1 AND (a.expires_at IS NULL OR datetime(a.expires_at) > datetime('now'))
       ORDER BY a.priority DESC, a.created_at DESC
       LIMIT 20
     `).all();
@@ -781,7 +777,6 @@ router.get('/announcements', optionalAuth, (req, res) => {
       return false;
     });
 
-    db.close();
     res.json({ announcements: filtered });
   } catch (error) { res.status(500).json({ error: 'Failed to get announcements' }); }
 });
@@ -809,7 +804,6 @@ router.post('/announcements', requireAuth, requireAdmin, (req, res) => {
     if (content.length > 2000) return res.status(400).json({ error: 'Content must be 2000 characters or less' });
     if (link_url && !isValidUrl(link_url)) return res.status(400).json({ error: 'Invalid URL format' });
     const id = uuidv4();
-    const db = new Database(DB_PATH);
     db.prepare(`
       INSERT INTO announcements 
       (id, title, content, type, created_by, expires_at, target_audience, dismissible, auto_dismiss_days, link_url, link_text, priority) 
@@ -831,7 +825,6 @@ router.post('/announcements', requireAuth, requireAdmin, (req, res) => {
     // Audit log
     db.prepare('INSERT INTO admin_audit_logs (id, admin_id, action, target_type, target_id, details) VALUES (?, ?, ?, ?, ?, ?)').run(uuidv4(), req.user.id, 'create_announcement', 'announcement', id, JSON.stringify({ title, target_audience }));
     const announcement = db.prepare('SELECT a.*, u.display_name as author_name FROM announcements a JOIN users u ON a.created_by = u.id WHERE a.id = ?').get(id);
-    db.close();
     res.json({ announcement });
   } catch (error) { res.status(500).json({ error: 'Failed to create announcement' }); }
 });
@@ -842,7 +835,6 @@ router.put('/announcements/:id', requireAuth, requireAdmin, (req, res) => {
     if (title && title.length > 200) return res.status(400).json({ error: 'Title must be 200 characters or less' });
     if (content && content.length > 2000) return res.status(400).json({ error: 'Content must be 2000 characters or less' });
     if (link_url && !isValidUrl(link_url)) return res.status(400).json({ error: 'Invalid URL format' });
-    const db = new Database(DB_PATH);
     db.prepare(`
       UPDATE announcements SET 
         title=COALESCE(?,title), 
@@ -860,26 +852,21 @@ router.put('/announcements/:id', requireAuth, requireAdmin, (req, res) => {
     `).run(title, content, type, is_active, expires_at, target_audience, dismissible, auto_dismiss_days, link_url, link_text, priority, req.params.id);
     db.prepare('INSERT INTO admin_audit_logs (id, admin_id, action, target_type, target_id, details) VALUES (?, ?, ?, ?, ?, ?)').run(uuidv4(), req.user.id, 'update_announcement', 'announcement', req.params.id, JSON.stringify({ title }));
     const updated = db.prepare('SELECT a.*, u.display_name as author_name FROM announcements a JOIN users u ON a.created_by = u.id WHERE a.id = ?').get(req.params.id);
-    db.close();
     res.json({ announcement: updated });
   } catch (error) { res.status(500).json({ error: 'Failed to update announcement' }); }
 });
 
 router.delete('/announcements/:id', requireAuth, requireAdmin, (req, res) => {
   try {
-    const db = new Database(DB_PATH);
     db.prepare('INSERT INTO admin_audit_logs (id, admin_id, action, target_type, target_id) VALUES (?, ?, ?, ?, ?)').run(uuidv4(), req.user.id, 'delete_announcement', 'announcement', req.params.id);
     db.prepare('DELETE FROM announcements WHERE id = ?').run(req.params.id);
-    db.close();
     res.json({ success: true });
   } catch (error) { res.status(500).json({ error: 'Failed to delete announcement' }); }
 });
 
 router.post('/announcements/:id/read', requireAuth, (req, res) => {
   try {
-    const db = new Database(DB_PATH);
     db.prepare('INSERT OR IGNORE INTO announcement_reads (user_id, announcement_id) VALUES (?, ?)').run(req.user.id, req.params.id);
-    db.close();
     res.json({ success: true });
   } catch (error) { res.status(500).json({ error: 'Failed' }); }
 });
@@ -890,7 +877,6 @@ router.post('/announcements/:id/read', requireAuth, (req, res) => {
 
 router.get('/admin/stats', requireAuth, requireAdmin, (req, res) => {
   try {
-    const db = new Database(DB_PATH);
     const totalUsers = db.prepare('SELECT COUNT(*) as count FROM users').get().count;
     const newUsersToday = db.prepare("SELECT COUNT(*) as count FROM users WHERE created_at >= date('now')").get().count;
     const newUsersWeek = db.prepare("SELECT COUNT(*) as count FROM users WHERE created_at >= date('now', '-7 days')").get().count;
@@ -920,7 +906,6 @@ router.get('/admin/stats', requireAuth, requireAdmin, (req, res) => {
       GROUP BY u.id ORDER BY activity_score DESC LIMIT 10
     `).all();
 
-    db.close();
     res.json({
       totalUsers, newUsersToday, newUsersWeek,
       totalDocuments, activeDocuments, publicDocuments,
@@ -941,7 +926,6 @@ router.get('/admin/documents', requireAuth, requireAdmin, (req, res) => {
     const search = req.query.search || '';
     const filter = req.query.filter || 'all'; // 'all' | 'public' | 'deleted'
     const offset = (page - 1) * limit;
-    const db = new Database(DB_PATH);
 
     let where = '1=1';
     const params = [];
@@ -959,30 +943,25 @@ router.get('/admin/documents', requireAuth, requireAdmin, (req, res) => {
       WHERE ${where}
       ORDER BY d.created_at DESC LIMIT ? OFFSET ?
     `).all(...params, limit, offset);
-    db.close();
     res.json({ documents: docs, total, page, totalPages: Math.ceil(total / limit) });
   } catch (error) { res.status(500).json({ error: 'Failed to get documents' }); }
 });
 
 router.delete('/admin/documents/:docId', requireAuth, requireAdmin, (req, res) => {
   try {
-    const db = new Database(DB_PATH);
     db.prepare('INSERT INTO admin_audit_logs (id, admin_id, action, target_type, target_id) VALUES (?, ?, ?, ?, ?)').run(uuidv4(), req.user.id, 'delete_document', 'document', req.params.docId);
     db.prepare("UPDATE documents SET deleted_at = CURRENT_TIMESTAMP, is_public = 0 WHERE id = ?").run(req.params.docId);
-    db.close();
     res.json({ success: true });
   } catch (error) { res.status(500).json({ error: 'Failed to delete document' }); }
 });
 
 router.put('/admin/documents/:docId/toggle-public', requireAuth, requireAdmin, (req, res) => {
   try {
-    const db = new Database(DB_PATH);
     const doc = db.prepare('SELECT is_public FROM documents WHERE id = ?').get(req.params.docId);
-    if (!doc) { db.close(); return res.status(404).json({ error: 'Not found' }); }
+    if (!doc) { return res.status(404).json({ error: 'Not found' }); }
     const newPublic = doc.is_public ? 0 : 1;
     db.prepare('UPDATE documents SET is_public = ? WHERE id = ?').run(newPublic, req.params.docId);
     db.prepare('INSERT INTO admin_audit_logs (id, admin_id, action, target_type, target_id, details) VALUES (?, ?, ?, ?, ?, ?)').run(uuidv4(), req.user.id, newPublic ? 'make_public' : 'make_private', 'document', req.params.docId, '{}');
-    db.close();
     res.json({ success: true, is_public: !!newPublic });
   } catch (error) { res.status(500).json({ error: 'Failed' }); }
 });
@@ -996,7 +975,6 @@ router.get('/admin/audit-logs', requireAuth, requireAdmin, (req, res) => {
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 50;
     const offset = (page - 1) * limit;
-    const db = new Database(DB_PATH);
     const total = db.prepare('SELECT COUNT(*) as count FROM admin_audit_logs').get().count;
     const logs = db.prepare(`
       SELECT a.*, u.display_name as admin_name, u.username as admin_username
@@ -1004,7 +982,6 @@ router.get('/admin/audit-logs', requireAuth, requireAdmin, (req, res) => {
       JOIN users u ON a.admin_id = u.id
       ORDER BY a.created_at DESC LIMIT ? OFFSET ?
     `).all(limit, offset);
-    db.close();
     res.json({ logs, total, page, totalPages: Math.ceil(total / limit) });
   } catch (error) { res.status(500).json({ error: 'Failed to get audit logs' }); }
 });
@@ -1015,9 +992,9 @@ router.get('/admin/audit-logs', requireAuth, requireAdmin, (req, res) => {
 
 router.get('/export/markdown/:docId', requireAuth, (req, res) => {
   try {
-    const db = new Database(DB_PATH);
-    const doc = db.prepare('SELECT * FROM documents WHERE id = ?').get(req.params.docId);
-    if (!doc) { db.close(); return res.status(404).json({ error: 'Document not found' }); }
+    if (!ownsDocument(req.params.docId, req.user)) return res.status(404).json({ error: 'Document not found' });
+    const doc = db.prepare('SELECT original_name FROM documents WHERE id = ?').get(req.params.docId);
+    if (!doc) { return res.status(404).json({ error: 'Document not found' }); }
 
     // Gather all sessions
     const sessions = {};
@@ -1076,14 +1053,13 @@ router.get('/export/markdown/:docId', requireAuth, (req, res) => {
     }
 
     // Notes
-    const notes = db.prepare('SELECT * FROM document_notes WHERE document_id = ? ORDER BY created_at').all(req.params.docId);
+    const notes = db.prepare('SELECT content FROM document_notes WHERE document_id = ? AND user_id = ? ORDER BY created_at').all(req.params.docId, req.user.id);
     if (notes.length > 0) {
       md += `## 📌 Ghi chú cá nhân\n\n`;
       notes.forEach(n => md += `- ${n.content}\n`);
       md += '\n';
     }
 
-    db.close();
     res.json({ markdown: md, filename: `${doc.original_name}.md` });
   } catch (error) { res.status(500).json({ error: 'Export failed' }); }
 });
@@ -1096,7 +1072,6 @@ const serverStartTime = Date.now();
 
 router.get('/admin/realtime', requireAuth, requireAdmin, (req, res) => {
   try {
-    const db = new Database(DB_PATH);
     const now = new Date();
     const oneHourAgo = new Date(now - 3600000).toISOString();
     const uploadsLastHour = db.prepare("SELECT COUNT(*) as count FROM upload_logs WHERE uploaded_at >= ?").get(oneHourAgo).count;
@@ -1112,7 +1087,6 @@ router.get('/admin/realtime', requireAuth, requireAdmin, (req, res) => {
       const c = db.prepare("SELECT COUNT(*) as count FROM ai_usage_logs WHERE created_at >= ? AND created_at < ?").get(from, to).count;
       sparkline.push(c);
     }
-    db.close();
     res.json({
       uploadsLastHour, chatMsgsLastHour, aiCallsLastHour, aiErrorsLastHour,
       activeUsersToday: onlineRecent,
@@ -1130,12 +1104,10 @@ router.post('/admin/bulk/users/plan', requireAuth, requireAdmin, (req, res) => {
   try {
     const { userIds, plan } = req.body;
     if (!userIds || !Array.isArray(userIds) || !plan) return res.status(400).json({ error: 'userIds and plan required' });
-    const db = new Database(DB_PATH);
     const stmt = db.prepare('UPDATE users SET plan = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?');
     const run = db.transaction((ids) => { for (const id of ids) stmt.run(plan, id); });
     run(userIds);
     db.prepare('INSERT INTO admin_audit_logs (id, admin_id, action, target_type, details) VALUES (?, ?, ?, ?, ?)').run(uuidv4(), req.user.id, 'bulk_set_plan', 'user', JSON.stringify({ userIds, plan }));
-    db.close();
     res.json({ success: true, affected: userIds.length });
   } catch (error) { res.status(500).json({ error: 'Bulk plan update failed' }); }
 });
@@ -1144,12 +1116,10 @@ router.post('/admin/bulk/users/ban', requireAuth, requireAdmin, (req, res) => {
   try {
     const { userIds, reason } = req.body;
     if (!userIds || !Array.isArray(userIds)) return res.status(400).json({ error: 'userIds required' });
-    const db = new Database(DB_PATH);
     const stmt = db.prepare('UPDATE users SET is_banned = 1, ban_reason = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?');
     const run = db.transaction((ids) => { for (const id of ids) stmt.run(reason || 'Bulk ban', id); });
     run(userIds);
     db.prepare('INSERT INTO admin_audit_logs (id, admin_id, action, target_type, details) VALUES (?, ?, ?, ?, ?)').run(uuidv4(), req.user.id, 'bulk_ban', 'user', JSON.stringify({ userIds }));
-    db.close();
     res.json({ success: true, affected: userIds.length });
   } catch (error) { res.status(500).json({ error: 'Bulk ban failed' }); }
 });
@@ -1158,12 +1128,10 @@ router.post('/admin/bulk/docs/delete', requireAuth, requireAdmin, (req, res) => 
   try {
     const { docIds } = req.body;
     if (!docIds || !Array.isArray(docIds)) return res.status(400).json({ error: 'docIds required' });
-    const db = new Database(DB_PATH);
     const stmt = db.prepare("UPDATE documents SET deleted_at = CURRENT_TIMESTAMP WHERE id = ?");
     const run = db.transaction((ids) => { for (const id of ids) stmt.run(id); });
     run(docIds);
     db.prepare('INSERT INTO admin_audit_logs (id, admin_id, action, target_type, details) VALUES (?, ?, ?, ?, ?)').run(uuidv4(), req.user.id, 'bulk_delete_docs', 'document', JSON.stringify({ count: docIds.length }));
-    db.close();
     res.json({ success: true, affected: docIds.length });
   } catch (error) { res.status(500).json({ error: 'Bulk delete failed' }); }
 });
@@ -1172,12 +1140,10 @@ router.post('/admin/bulk/docs/toggle-public', requireAuth, requireAdmin, (req, r
   try {
     const { docIds, is_public } = req.body;
     if (!docIds || !Array.isArray(docIds)) return res.status(400).json({ error: 'docIds required' });
-    const db = new Database(DB_PATH);
     const stmt = db.prepare("UPDATE documents SET is_public = ? WHERE id = ?");
     const run = db.transaction((ids) => { for (const id of ids) stmt.run(is_public ? 1 : 0, id); });
     run(docIds);
     db.prepare('INSERT INTO admin_audit_logs (id, admin_id, action, target_type, details) VALUES (?, ?, ?, ?, ?)').run(uuidv4(), req.user.id, is_public ? 'bulk_make_public' : 'bulk_make_private', 'document', JSON.stringify({ count: docIds.length }));
-    db.close();
     res.json({ success: true, affected: docIds.length });
   } catch (error) { res.status(500).json({ error: 'Bulk toggle failed' }); }
 });
@@ -1188,16 +1154,14 @@ router.post('/admin/bulk/docs/toggle-public', requireAuth, requireAdmin, (req, r
 
 router.get('/admin/users/:userId', requireAuth, requireAdmin, (req, res) => {
   try {
-    const db = new Database(DB_PATH);
     const user = db.prepare('SELECT id, username, email, display_name, avatar_url, plan, plan_expires_at, role, is_banned, ban_reason, created_at, updated_at, email_verified FROM users WHERE id = ?').get(req.params.userId);
-    if (!user) { db.close(); return res.status(404).json({ error: 'User not found' }); }
+    if (!user) { return res.status(404).json({ error: 'User not found' }); }
     const documents = db.prepare('SELECT id, original_name, status, is_public, created_at FROM documents WHERE user_id = ? ORDER BY created_at DESC LIMIT 50').all(user.id);
     const recentActivity = db.prepare('SELECT * FROM daily_activity WHERE user_id = ? ORDER BY activity_date DESC LIMIT 30').all(user.id);
     const loginHistory = db.prepare('SELECT * FROM login_activity WHERE user_id = ? ORDER BY created_at DESC LIMIT 20').all(user.id);
     const streak = db.prepare('SELECT * FROM user_streaks WHERE user_id = ?').get(user.id);
     const totalAiCalls = db.prepare('SELECT COUNT(*) as count, SUM(total_tokens) as tokens FROM ai_usage_logs WHERE user_id = ?').get(user.id);
     const totalDocs = documents.length;
-    db.close();
     res.json({ user, documents, recentActivity, loginHistory, streak, aiUsage: totalAiCalls, totalDocs });
   } catch (error) { res.status(500).json({ error: 'Failed to get user details' }); }
 });
@@ -1208,7 +1172,6 @@ router.get('/admin/users/:userId', requireAuth, requireAdmin, (req, res) => {
 
 router.get('/admin/ai-usage', requireAuth, requireAdmin, (req, res) => {
   try {
-    const db = new Database(DB_PATH);
     const days = parseInt(req.query.days) || 7;
     const totalCalls = db.prepare("SELECT COUNT(*) as count FROM ai_usage_logs WHERE created_at >= date('now', ?)").get(`-${days} days`).count;
     const totalTokens = db.prepare("SELECT COALESCE(SUM(total_tokens), 0) as total FROM ai_usage_logs WHERE created_at >= date('now', ?)").get(`-${days} days`).total;
@@ -1221,7 +1184,6 @@ router.get('/admin/ai-usage', requireAuth, requireAdmin, (req, res) => {
       FROM ai_usage_logs a JOIN users u ON a.user_id = u.id
       WHERE a.created_at >= date('now', ?) GROUP BY u.id ORDER BY calls DESC LIMIT 10
     `).all(`-${days} days`);
-    db.close();
     res.json({ totalCalls, totalTokens, avgLatency: Math.round(avgLatency), errorRate, byAction, daily, topUsers });
   } catch (error) { res.status(500).json({ error: 'Failed to get AI usage' }); }
 });
@@ -1236,14 +1198,12 @@ router.get('/admin/reports', requireAuth, requireAdmin, (req, res) => {
     const page = parseInt(req.query.page) || 1;
     const limit = 20;
     const offset = (page - 1) * limit;
-    const db = new Database(DB_PATH);
     const total = db.prepare('SELECT COUNT(*) as count FROM content_reports WHERE status = ?').get(status).count;
     const reports = db.prepare(`
       SELECT r.*, u.display_name as reporter_name, u.username as reporter_username
       FROM content_reports r JOIN users u ON r.reporter_id = u.id
       WHERE r.status = ? ORDER BY r.created_at DESC LIMIT ? OFFSET ?
     `).all(status, limit, offset);
-    db.close();
     res.json({ reports, total, page, totalPages: Math.ceil(total / limit) });
   } catch (error) { res.status(500).json({ error: 'Failed to get reports' }); }
 });
@@ -1253,9 +1213,7 @@ router.post('/community/report', requireAuth, (req, res) => {
     const { targetType, targetId, reason, details } = req.body;
     if (!targetType || !targetId || !reason) return res.status(400).json({ error: 'Missing fields' });
     const id = uuidv4();
-    const db = new Database(DB_PATH);
     db.prepare('INSERT INTO content_reports (id, reporter_id, target_type, target_id, reason, details) VALUES (?, ?, ?, ?, ?, ?)').run(id, req.user.id, targetType, targetId, reason, details || null);
-    db.close();
     res.json({ success: true, reportId: id });
   } catch (error) { res.status(500).json({ error: 'Failed to submit report' }); }
 });
@@ -1263,7 +1221,6 @@ router.post('/community/report', requireAuth, (req, res) => {
 router.put('/admin/reports/:reportId', requireAuth, requireAdmin, (req, res) => {
   try {
     const { status } = req.body; // 'approved' | 'rejected' | 'resolved'
-    const db = new Database(DB_PATH);
     db.prepare('UPDATE content_reports SET status = ?, reviewed_by = ?, reviewed_at = CURRENT_TIMESTAMP WHERE id = ?').run(status, req.user.id, req.params.reportId);
     const report = db.prepare('SELECT * FROM content_reports WHERE id = ?').get(req.params.reportId);
     // If approved and target is comment, delete it
@@ -1274,7 +1231,6 @@ router.put('/admin/reports/:reportId', requireAuth, requireAdmin, (req, res) => 
       db.prepare('UPDATE documents SET is_public = 0 WHERE id = ?').run(report.target_id);
     }
     db.prepare('INSERT INTO admin_audit_logs (id, admin_id, action, target_type, target_id, details) VALUES (?, ?, ?, ?, ?, ?)').run(uuidv4(), req.user.id, `report_${status}`, 'report', req.params.reportId, JSON.stringify({ target: report?.target_type }));
-    db.close();
     res.json({ success: true });
   } catch (error) { res.status(500).json({ error: 'Failed to update report' }); }
 });
@@ -1294,7 +1250,7 @@ router.get('/admin/system-health', requireAuth, requireAdmin, (req, res) => {
 
     // DB file size
     let dbSize = 0;
-    try { dbSize = fs.statSync(DB_PATH).size; } catch { }
+    try { dbSize = fs.statSync(db.name).size; } catch { }
 
     // Uploads folder size
     let uploadsSize = 0;
@@ -1307,12 +1263,10 @@ router.get('/admin/system-health', requireAuth, requireAdmin, (req, res) => {
     } catch { }
 
     // Recent errors from ai_usage_logs
-    const db = new Database(DB_PATH);
     const recentErrors = db.prepare("SELECT action, error_message, created_at FROM ai_usage_logs WHERE success = 0 ORDER BY created_at DESC LIMIT 10").all();
     const totalErrors24h = db.prepare("SELECT COUNT(*) as count FROM ai_usage_logs WHERE success = 0 AND created_at >= datetime('now', '-1 day')").get().count;
     const totalCalls24h = db.prepare("SELECT COUNT(*) as count FROM ai_usage_logs WHERE created_at >= datetime('now', '-1 day')").get().count;
     const avgResponseTime = db.prepare("SELECT COALESCE(AVG(latency_ms), 0) as avg FROM ai_usage_logs WHERE success = 1 AND created_at >= datetime('now', '-1 day')").get().avg;
-    db.close();
 
     res.json({
       uptime,
@@ -1346,7 +1300,6 @@ router.post('/admin/email-blast', requireAuth, requireAdmin, async (req, res) =>
     const { subject, content, targetFilter } = req.body;
     if (!subject || !content) return res.status(400).json({ error: 'Subject and content required' });
     const id = uuidv4();
-    const db = new Database(DB_PATH);
 
     let whereClause = "WHERE email IS NOT NULL AND email != ''";
     if (targetFilter === 'active') whereClause += " AND id IN (SELECT DISTINCT user_id FROM daily_activity WHERE activity_date >= date('now', '-7 days'))";
@@ -1363,7 +1316,6 @@ router.post('/admin/email-blast', requireAuth, requireAdmin, async (req, res) =>
 
     db.prepare('INSERT INTO email_blasts (id, subject, content, target_filter, total_recipients, status, sent_by) VALUES (?, ?, ?, ?, ?, ?, ?)').run(id, subject, content, targetFilter || 'all', recipients.length, 'sending', req.user.id);
     db.prepare('INSERT INTO admin_audit_logs (id, admin_id, action, target_type, target_id, details) VALUES (?, ?, ?, ?, ?, ?)').run(uuidv4(), req.user.id, 'send_email_blast', 'email_blast', id, JSON.stringify({ subject, recipients: recipients.length }));
-    db.close();
 
     // Send asynchronously — don't block response
     res.json({ success: true, blastId: id, totalRecipients: recipients.length });
@@ -1379,9 +1331,7 @@ router.post('/admin/email-blast', requireAuth, requireAdmin, async (req, res) =>
         } catch { failed++; }
       }
       try {
-        const db2 = new Database(DB_PATH);
-        db2.prepare('UPDATE email_blasts SET sent_count = ?, failed_count = ?, status = ?, completed_at = CURRENT_TIMESTAMP WHERE id = ?').run(sent, failed, 'completed', id);
-        db2.close();
+        db.prepare('UPDATE email_blasts SET sent_count = ?, failed_count = ?, status = ?, completed_at = CURRENT_TIMESTAMP WHERE id = ?').run(sent, failed, 'completed', id);
       } catch { }
     })();
   } catch (error) { res.status(500).json({ error: 'Failed to send blast' }); }
@@ -1389,13 +1339,11 @@ router.post('/admin/email-blast', requireAuth, requireAdmin, async (req, res) =>
 
 router.get('/admin/email-blasts', requireAuth, requireAdmin, (req, res) => {
   try {
-    const db = new Database(DB_PATH);
     const blasts = db.prepare(`
       SELECT e.*, u.display_name as sender_name, u.username as sender_username
       FROM email_blasts e JOIN users u ON e.sent_by = u.id
       ORDER BY e.created_at DESC LIMIT 20
     `).all();
-    db.close();
     res.json({ blasts });
   } catch (error) { res.status(500).json({ error: 'Failed to get blasts' }); }
 });
@@ -1406,9 +1354,7 @@ router.get('/admin/email-blasts', requireAuth, requireAdmin, (req, res) => {
 
 router.get('/admin/feature-flags', requireAuth, requireAdmin, (req, res) => {
   try {
-    const db = new Database(DB_PATH);
     const flags = db.prepare('SELECT * FROM feature_flags ORDER BY name').all();
-    db.close();
     res.json({ flags });
   } catch (error) { res.status(500).json({ error: 'Failed to get feature flags' }); }
 });
@@ -1418,11 +1364,9 @@ router.post('/admin/feature-flags', requireAuth, requireAdmin, (req, res) => {
     const { name, description, enabled, plans } = req.body;
     if (!name) return res.status(400).json({ error: 'Name required' });
     const id = uuidv4();
-    const db = new Database(DB_PATH);
     db.prepare('INSERT INTO feature_flags (id, name, description, enabled, plans, updated_by) VALUES (?, ?, ?, ?, ?, ?)').run(id, name, description || '', enabled !== undefined ? (enabled ? 1 : 0) : 1, JSON.stringify(plans || ['free', 'basic', 'pro', 'unlimited']), req.user.id);
     db.prepare('INSERT INTO admin_audit_logs (id, admin_id, action, target_type, target_id, details) VALUES (?, ?, ?, ?, ?, ?)').run(uuidv4(), req.user.id, 'create_feature_flag', 'feature_flag', id, JSON.stringify({ name }));
     const flag = db.prepare('SELECT * FROM feature_flags WHERE id = ?').get(id);
-    db.close();
     res.json({ flag });
   } catch (error) { res.status(500).json({ error: 'Failed to create flag' }); }
 });
@@ -1430,21 +1374,17 @@ router.post('/admin/feature-flags', requireAuth, requireAdmin, (req, res) => {
 router.put('/admin/feature-flags/:id', requireAuth, requireAdmin, (req, res) => {
   try {
     const { name, description, enabled, plans } = req.body;
-    const db = new Database(DB_PATH);
     db.prepare('UPDATE feature_flags SET name=COALESCE(?,name), description=COALESCE(?,description), enabled=COALESCE(?,enabled), plans=COALESCE(?,plans), updated_by=?, updated_at=CURRENT_TIMESTAMP WHERE id=?').run(name, description, enabled !== undefined ? (enabled ? 1 : 0) : null, plans ? JSON.stringify(plans) : null, req.user.id, req.params.id);
     db.prepare('INSERT INTO admin_audit_logs (id, admin_id, action, target_type, target_id, details) VALUES (?, ?, ?, ?, ?, ?)').run(uuidv4(), req.user.id, 'update_feature_flag', 'feature_flag', req.params.id, JSON.stringify({ name, enabled }));
     const flag = db.prepare('SELECT * FROM feature_flags WHERE id = ?').get(req.params.id);
-    db.close();
     res.json({ flag });
   } catch (error) { res.status(500).json({ error: 'Failed to update flag' }); }
 });
 
 router.delete('/admin/feature-flags/:id', requireAuth, requireAdmin, (req, res) => {
   try {
-    const db = new Database(DB_PATH);
     db.prepare('INSERT INTO admin_audit_logs (id, admin_id, action, target_type, target_id) VALUES (?, ?, ?, ?, ?)').run(uuidv4(), req.user.id, 'delete_feature_flag', 'feature_flag', req.params.id);
     db.prepare('DELETE FROM feature_flags WHERE id = ?').run(req.params.id);
-    db.close();
     res.json({ success: true });
   } catch (error) { res.status(500).json({ error: 'Failed to delete flag' }); }
 });
@@ -1452,9 +1392,7 @@ router.delete('/admin/feature-flags/:id', requireAuth, requireAdmin, (req, res) 
 // Public endpoint to check feature flags for current user
 router.get('/feature-flags', (req, res) => {
   try {
-    const db = new Database(DB_PATH);
     const flags = db.prepare('SELECT name, enabled, plans FROM feature_flags').all();
-    db.close();
     const result = {};
     flags.forEach(f => { result[f.name] = { enabled: !!f.enabled, plans: JSON.parse(f.plans || '[]') }; });
     res.json(result);
@@ -1467,12 +1405,10 @@ router.get('/feature-flags', (req, res) => {
 
 router.get('/admin/export/users', requireAuth, requireAdmin, (req, res) => {
   try {
-    const db = new Database(DB_PATH);
     const users = db.prepare('SELECT id, username, email, display_name, plan, role, is_banned, created_at FROM users ORDER BY created_at DESC').all();
-    db.close();
     let csv = 'ID,Username,Email,Display Name,Plan,Role,Banned,Created At\n';
     for (const u of users) {
-      csv += `${u.id},"${u.username}","${u.email || ''}","${u.display_name || ''}",${u.plan},${u.role},${u.is_banned},${u.created_at}\n`;
+      csv += `${u.id},${csvCell(u.username)},${csvCell(u.email)},${csvCell(u.display_name)},${u.plan},${u.role},${u.is_banned},${u.created_at}\n`;
     }
     db.prepare && 0; // no-op
     res.json({ csv, filename: `users_export_${new Date().toISOString().split('T')[0]}.csv`, count: users.length });
@@ -1481,16 +1417,14 @@ router.get('/admin/export/users', requireAuth, requireAdmin, (req, res) => {
 
 router.get('/admin/export/documents', requireAuth, requireAdmin, (req, res) => {
   try {
-    const db = new Database(DB_PATH);
     const docs = db.prepare(`
       SELECT d.id, d.original_name, d.status, d.is_public, d.created_at, u.username as owner
       FROM documents d LEFT JOIN users u ON d.user_id = u.id
       WHERE d.deleted_at IS NULL ORDER BY d.created_at DESC
     `).all();
-    db.close();
     let csv = 'ID,Title,Status,Public,Owner,Created At\n';
     for (const d of docs) {
-      csv += `${d.id},"${(d.original_name || '').replace(/"/g, '""')}",${d.status},${d.is_public ? 'Yes' : 'No'},"${d.owner || ''}",${d.created_at}\n`;
+      csv += `${d.id},${csvCell(d.original_name)},${d.status},${d.is_public ? 'Yes' : 'No'},${csvCell(d.owner)},${d.created_at}\n`;
     }
     res.json({ csv, filename: `documents_export_${new Date().toISOString().split('T')[0]}.csv`, count: docs.length });
   } catch (error) { res.status(500).json({ error: 'Export failed' }); }
@@ -1498,16 +1432,14 @@ router.get('/admin/export/documents', requireAuth, requireAdmin, (req, res) => {
 
 router.get('/admin/export/activity', requireAuth, requireAdmin, (req, res) => {
   try {
-    const db = new Database(DB_PATH);
     const activity = db.prepare(`
       SELECT da.*, u.username FROM daily_activity da
       JOIN users u ON da.user_id = u.id
       ORDER BY da.activity_date DESC LIMIT 5000
     `).all();
-    db.close();
     let csv = 'Date,Username,Flashcards,Quizzes,Documents,Chat Messages,Study Minutes\n';
     for (const a of activity) {
-      csv += `${a.activity_date},"${a.username}",${a.flashcards_reviewed},${a.quizzes_completed},${a.documents_uploaded},${a.chat_messages},${a.study_minutes}\n`;
+      csv += `${a.activity_date},${csvCell(a.username)},${a.flashcards_reviewed},${a.quizzes_completed},${a.documents_uploaded},${a.chat_messages},${a.study_minutes}\n`;
     }
     res.json({ csv, filename: `activity_export_${new Date().toISOString().split('T')[0]}.csv`, count: activity.length });
   } catch (error) { res.status(500).json({ error: 'Export failed' }); }
@@ -1522,7 +1454,6 @@ router.get('/admin/login-activity', requireAuth, requireAdmin, (req, res) => {
     const page = parseInt(req.query.page) || 1;
     const limit = 50;
     const offset = (page - 1) * limit;
-    const db = new Database(DB_PATH);
     const total = db.prepare('SELECT COUNT(*) as count FROM login_activity').get().count;
     const logs = db.prepare(`
       SELECT la.*, u.display_name, u.username
@@ -1535,7 +1466,6 @@ router.get('/admin/login-activity', requireAuth, requireAdmin, (req, res) => {
         MAX(created_at) as last_seen
       FROM login_activity GROUP BY ip_address ORDER BY count DESC LIMIT 20
     `).all();
-    db.close();
     res.json({ logs, total, page, totalPages: Math.ceil(total / limit), ipSummary });
   } catch (error) { res.status(500).json({ error: 'Failed to get login activity' }); }
 });
@@ -1545,9 +1475,7 @@ router.post('/track-login', requireAuth, (req, res) => {
   try {
     const ip = req.headers['x-forwarded-for']?.split(',')[0] || req.ip || 'unknown';
     const userAgent = req.headers['user-agent'] || '';
-    const db = new Database(DB_PATH);
     db.prepare('INSERT INTO login_activity (user_id, ip_address, user_agent, success) VALUES (?, ?, ?, 1)').run(req.user.id, ip, userAgent);
-    db.close();
     res.json({ success: true });
   } catch { res.json({ success: false }); }
 });
@@ -1558,9 +1486,7 @@ router.post('/track-login', requireAuth, (req, res) => {
 
 router.get('/system/settings', (req, res) => {
   try {
-    const db = new Database(DB_PATH);
     const rows = db.prepare('SELECT key, value FROM system_settings').all();
-    db.close();
     const settings = {};
     rows.forEach(r => { try { settings[r.key] = JSON.parse(r.value); } catch { settings[r.key] = r.value; } });
     res.json(settings);
@@ -1571,10 +1497,8 @@ router.put('/admin/system-settings', requireAuth, requireAdmin, (req, res) => {
   try {
     const { key, value } = req.body;
     if (!key) return res.status(400).json({ error: 'Key required' });
-    const db = new Database(DB_PATH);
     db.prepare('INSERT INTO system_settings (key, value, updated_by) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_by = excluded.updated_by, updated_at = CURRENT_TIMESTAMP').run(key, JSON.stringify(value), req.user.id);
     db.prepare('INSERT INTO admin_audit_logs (id, admin_id, action, target_type, target_id, details) VALUES (?, ?, ?, ?, ?, ?)').run(uuidv4(), req.user.id, 'update_system_setting', 'setting', key, JSON.stringify({ value }));
-    db.close();
     res.json({ success: true });
   } catch (error) { res.status(500).json({ error: 'Failed to update setting' }); }
 });
@@ -1589,10 +1513,8 @@ router.post('/learning-paths', requireAuth, async (req, res) => {
     const { documentId, language } = req.body;
     if (!documentId) return res.status(400).json({ error: 'Document ID is required' });
 
-    const db = new Database(DB_PATH);
     const doc = db.prepare('SELECT * FROM documents WHERE id = ? AND user_id = ? AND deleted_at IS NULL').get(documentId, req.user.id);
     if (!doc) {
-      db.close();
       return res.status(404).json({ error: 'Document not found' });
     }
 
@@ -1606,7 +1528,6 @@ router.post('/learning-paths', requireAuth, async (req, res) => {
         console.warn('Could not extract text for learning path:', err.message);
       }
     }
-    db.close();
 
     if (!docText) docText = doc.original_name || 'Tài liệu học tập';
 
@@ -1620,9 +1541,8 @@ router.post('/learning-paths', requireAuth, async (req, res) => {
     });
 
     const pathId = uuidv4();
-    const dbWrite = new Database(DB_PATH);
 
-    dbWrite.prepare(`
+    db.prepare(`
       INSERT INTO learning_paths (id, user_id, name, description, document_ids, path_data, estimated_hours)
       VALUES (?, ?, ?, ?, ?, ?, ?)
     `).run(
@@ -1631,8 +1551,7 @@ router.post('/learning-paths', requireAuth, async (req, res) => {
       pathData.estimated_hours || 1.0
     );
 
-    const newPath = dbWrite.prepare('SELECT * FROM learning_paths WHERE id = ?').get(pathId);
-    dbWrite.close();
+    const newPath = db.prepare('SELECT * FROM learning_paths WHERE id = ?').get(pathId);
 
     res.json({ learningPath: { ...newPath, steps: pathData.steps || [] } });
   } catch (error) {
@@ -1643,7 +1562,6 @@ router.post('/learning-paths', requireAuth, async (req, res) => {
 
 router.get('/learning-paths', requireAuth, (req, res) => {
   try {
-    const db = new Database(DB_PATH);
     const paths = db.prepare('SELECT * FROM learning_paths WHERE user_id = ? ORDER BY created_at DESC').all(req.user.id);
 
     // Parse steps
@@ -1653,7 +1571,6 @@ router.get('/learning-paths', requireAuth, (req, res) => {
       delete p.path_data; // Don't send double data
     });
 
-    db.close();
     res.json({ learningPaths: paths });
   } catch (error) {
     res.status(500).json({ error: 'Failed to get learning paths' });
@@ -1662,11 +1579,9 @@ router.get('/learning-paths', requireAuth, (req, res) => {
 
 router.get('/learning-paths/:id', requireAuth, (req, res) => {
   try {
-    const db = new Database(DB_PATH);
     const lp = db.prepare('SELECT * FROM learning_paths WHERE id = ? AND user_id = ?').get(req.params.id, req.user.id);
 
     if (!lp) {
-      db.close();
       return res.status(404).json({ error: 'Learning path not found' });
     }
 
@@ -1678,7 +1593,6 @@ router.get('/learning-paths/:id', requireAuth, (req, res) => {
     const progress = db.prepare('SELECT step_id, completed_at FROM learning_path_progress WHERE path_id = ?').all(lp.id);
     lp.progress = progress;
 
-    db.close();
     res.json({ learningPath: lp });
   } catch (error) {
     res.status(500).json({ error: 'Failed to get learning path' });
@@ -1690,12 +1604,10 @@ router.put('/learning-paths/:id/progress', requireAuth, (req, res) => {
     const { stepId, completed } = req.body;
     if (!stepId) return res.status(400).json({ error: 'Step ID required' });
 
-    const db = new Database(DB_PATH);
 
     // Check ownership
     const lp = db.prepare('SELECT id FROM learning_paths WHERE id = ? AND user_id = ?').get(req.params.id, req.user.id);
     if (!lp) {
-      db.close();
       return res.status(404).json({ error: 'Learning path not found' });
     }
 
@@ -1713,7 +1625,6 @@ router.put('/learning-paths/:id/progress', requireAuth, (req, res) => {
     db.prepare('UPDATE learning_paths SET updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(req.params.id);
 
     const progress = db.prepare('SELECT step_id, completed_at FROM learning_path_progress WHERE path_id = ?').all(lp.id);
-    db.close();
 
     res.json({ success: true, progress });
   } catch (error) {
@@ -1723,16 +1634,13 @@ router.put('/learning-paths/:id/progress', requireAuth, (req, res) => {
 
 router.delete('/learning-paths/:id', requireAuth, (req, res) => {
   try {
-    const db = new Database(DB_PATH);
     const lp = db.prepare('SELECT id FROM learning_paths WHERE id = ? AND user_id = ?').get(req.params.id, req.user.id);
 
     if (!lp) {
-      db.close();
       return res.status(404).json({ error: 'Learning path not found' });
     }
 
     db.prepare('DELETE FROM learning_paths WHERE id = ?').run(req.params.id);
-    db.close();
     res.json({ success: true });
   } catch (error) {
     res.status(500).json({ error: 'Failed to delete learning path' });

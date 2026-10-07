@@ -1,26 +1,28 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, lazy, Suspense } from 'react';
 import Header from './components/Header';
 import Hero from './components/Hero';
 import FileUpload from './components/FileUpload';
-import Dashboard from './components/Dashboard';
 import AuthModal from './components/AuthModal';
-import AdminPanel from './components/AdminPanel';
 import PricingPage from './components/PricingPage';
-import SharedDocViewer from './components/SharedDocViewer';
-import HistoryPage from './components/HistoryPage';
-import ProfilePage from './components/ProfilePage';
-import CommunityFeed from './components/CommunityFeed';
-import PublicDocViewer from './components/PublicDocViewer';
-import PublicProfilePage from './components/PublicProfilePage';
-import LeaderboardPage from './components/LeaderboardPage';
-import StatsPage from './components/StatsPage';
-import LearningPathsPage from './components/LearningPathsPage';
-import NotificationManager from './components/NotificationManager';
 import AnnouncementBanner from './components/AnnouncementBanner';
 import OfflinePage from './components/OfflinePage';
 import { getStoredUser, logout as apiLogout, getMe, verifyEmailToken, resetPassword, getSystemSettings, getDocumentHistory, getFolders, sendPresenceHeartbeat } from './api';
 import { CheckCircle2, XCircle, Loader2, Lock, Eye, EyeOff, ArrowLeft, Wrench, WifiOff } from 'lucide-react';
 import { useLanguage } from './LanguageContext';
+
+// Heavy / rarely-visited views are code-split so the landing page loads less JS
+const Dashboard = lazy(() => import('./components/Dashboard'));
+const AdminPanel = lazy(() => import('./components/AdminPanel'));
+const SharedDocViewer = lazy(() => import('./components/SharedDocViewer'));
+const HistoryPage = lazy(() => import('./components/HistoryPage'));
+const ProfilePage = lazy(() => import('./components/ProfilePage'));
+const CommunityFeed = lazy(() => import('./components/CommunityFeed'));
+const PublicDocViewer = lazy(() => import('./components/PublicDocViewer'));
+const PublicProfilePage = lazy(() => import('./components/PublicProfilePage'));
+const LeaderboardPage = lazy(() => import('./components/LeaderboardPage'));
+const StatsPage = lazy(() => import('./components/StatsPage'));
+const LearningPathsPage = lazy(() => import('./components/LearningPathsPage'));
+const NotificationManager = lazy(() => import('./components/NotificationManager'));
 
 export default function App() {
   const [currentDoc, setCurrentDoc] = useState(null);
@@ -188,7 +190,8 @@ export default function App() {
   // Verify stored token on mount
   useEffect(() => {
     if (user) {
-      getMe().then(u => setUser(u)).catch(() => {
+      getMe().then(u => setUser(u)).catch((err) => {
+        if (err?.response?.status !== 401 && err?.response?.status !== 403) return;
         apiLogout();
         setUser(null);
       });
@@ -400,6 +403,7 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-bg">
+      <Suspense fallback={<div className="flex justify-center py-24"><Loader2 className="w-8 h-8 animate-spin text-primary-500" /></div>}>
       {view === 'shared' && shareToken ? (
         <SharedDocViewer shareToken={shareToken} onBack={handleBackHome} />
       ) : (
@@ -454,7 +458,7 @@ export default function App() {
           )}
 
           {view === 'dashboard' && currentDoc && (
-            <Dashboard doc={currentDoc} user={user} />
+            <Dashboard key={currentDoc.docId} doc={currentDoc} user={user} />
           )}
 
           {view === 'history-list' && (
@@ -587,6 +591,7 @@ export default function App() {
           )}
         </>
       )}
+      </Suspense>
     </div>
   );
 }

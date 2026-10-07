@@ -1,9 +1,6 @@
-import Database from 'better-sqlite3';
-import path from 'path';
-import { fileURLToPath } from 'url';
+import crypto from 'crypto';
+import db from './database.js';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const DB_PATH = path.join(__dirname, '../data/notemind.db');
 
 /**
  * SuperMemo-2 (SM-2) algorithm implementation
@@ -68,7 +65,6 @@ function mapDifficultyToGrade(difficulty) {
  */
 export function reviewFlashcard(userId, documentId, flashcardId, difficulty, timeElapsedMs = 0) {
     try {
-        const db = new Database(DB_PATH);
         const quality = mapDifficultyToGrade(difficulty);
 
         // Get current metrics or create new if first time reviewing
@@ -131,7 +127,6 @@ export function reviewFlashcard(userId, documentId, flashcardId, difficulty, tim
         });
 
         updateMetrics();
-        db.close();
 
         return {
             success: true,
@@ -154,14 +149,12 @@ export function reviewFlashcard(userId, documentId, flashcardId, difficulty, tim
  */
 export function getDueFlashcards(userId, documentId) {
     try {
-        const db = new Database(DB_PATH);
         const rows = db.prepare(`
       SELECT flashcard_id, next_review_date, difficulty_level
       FROM flashcard_metrics
       WHERE user_id = ? AND document_id = ?
     `).all(userId, documentId);
 
-        db.close();
 
         const now = new Date();
 

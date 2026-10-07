@@ -18,7 +18,7 @@ export async function chatWithDocument(documentText, userMessage, history = [], 
   const cleanDoc = sanitizeDocumentText(truncatedDoc);
   const language = normalizeLanguage(options.language, options.acceptLanguage);
 
-  const systemPrompt = buildSystemPrompt('chatSingle', language).replace('{DOCUMENT_TEXT}', cleanDoc);
+  const systemPrompt = buildSystemPrompt('chatSingle', language).replace('{DOCUMENT_TEXT}', () => cleanDoc);
 
   // Build message history
   const messages = [
@@ -56,7 +56,7 @@ export async function chatWithMultipleDocuments(documents, userMessage, history 
     combinedText += `\n\n<document name="${idx + 1}: ${doc.fileName}">\n${sanitizeDocumentText(text)}\n</document>`;
   });
   const language = normalizeLanguage(options.language, options.acceptLanguage);
-  const systemPrompt = buildSystemPrompt('chatMulti', language).replace('{DOCUMENT_TEXT}', combinedText);
+  const systemPrompt = buildSystemPrompt('chatMulti', language).replace('{DOCUMENT_TEXT}', () => combinedText);
 
   const messages = [
     ...cleanHistory.slice(-10),

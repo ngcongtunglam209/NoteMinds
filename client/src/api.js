@@ -68,6 +68,8 @@ export function storeAuth(token, user) {
 export function clearAuth() {
   localStorage.removeItem(TOKEN_KEY);
   localStorage.removeItem(USER_KEY);
+  ['notemind_history_cache', 'notemind_folders_cache', 'notemind_history_cache_time', 'notemind_sessions_cache']
+    .forEach(k => localStorage.removeItem(k));
 }
 
 // Attach token to every request automatically and encrypt if needed

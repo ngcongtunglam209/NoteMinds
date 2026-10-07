@@ -5,7 +5,7 @@ import {
   Lock, Link2, BookOpen
 } from 'lucide-react';
 import {
-  validateShareToken, getSharedDocumentContent,
+  validateShareToken, getSharedDocumentContent, getApiBaseUrl,
   shareGenerateMindmap, shareGenerateFlashcards, shareChatWithDocument, shareGenerateSummary
 } from '../api';
 import MindmapView from './MindmapView';
@@ -49,7 +49,7 @@ export default function SharedDocViewer({ shareToken, onBack }) {
   useEffect(() => {
     if (!shareToken || !content) return;
 
-    const evtSource = new EventSource(`/api/shared/${shareToken}/events`);
+    const evtSource = new EventSource(`${getApiBaseUrl()}/shared/${shareToken}/events`);
 
     evtSource.addEventListener('summary', (e) => {
       try {

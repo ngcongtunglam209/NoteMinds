@@ -61,8 +61,9 @@ export function NotificationItem({ notification, onRead, onDelete, compact = fal
 
   const handleClick = () => {
     if (isUnread) onRead(notification.id);
-    if (notification.action_url) {
-      window.location.href = notification.action_url;
+    const url = notification.action_url && new URL(notification.action_url, window.location.origin);
+    if (url && url.origin === window.location.origin) {
+      window.location.href = url.pathname + url.search + url.hash;
     }
   };
 
