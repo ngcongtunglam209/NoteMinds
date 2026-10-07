@@ -76,7 +76,7 @@ export function LibraryView(p: Props) {
                 <small>{new Date(n.createdAt.replace(' ', 'T') + 'Z').toLocaleDateString(locale)}</small>
               </span>
               {n.status === 'processing' && <span className="notebook-state">{t('study.docProcessing')}</span>}
-              {n.status === 'failed' && <span className="notebook-state pen-note">{t(`error.${n.error ?? 'extraction_failed'}`)}</span>}
+              {n.status === 'failed' && <span className="notebook-state is-failed">{t(`error.${n.error ?? 'extraction_failed'}`)}</span>}
               {n.dueCount > 0 && <span className="notebook-due">{n.dueCount}</span>}
             </Link>
           </li>
