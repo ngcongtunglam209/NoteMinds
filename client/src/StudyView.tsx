@@ -73,8 +73,10 @@ export function StudyView(p: Props) {
           >
             <span>{i + 1}</span>
             <span className="step-label">{s.label}</span>
-            <StepMark status={s.status} />
-            {s.statusText && <span className="step-status">{s.statusText}</span>}
+            <span className="step-state">
+              <StepMark status={s.status} />
+              {s.statusText && <span className="step-status">{s.statusText}</span>}
+            </span>
           </button>
         ))}
       </div>
