@@ -1,5 +1,6 @@
 import express, { type ErrorRequestHandler } from 'express';
 import { authRouter, loadUser } from './auth.ts';
+import { documentsRouter } from './documents.ts';
 import type { DB } from './db.ts';
 
 export function createApp(db: DB, { rateLimits = true } = {}) {
@@ -14,6 +15,7 @@ export function createApp(db: DB, { rateLimits = true } = {}) {
     res.json({ ok: true });
   });
   app.use('/api/auth', authRouter(db, { rateLimits }));
+  app.use('/api/documents', documentsRouter(db));
   app.use('/api', (_req, res) => {
     res.status(404).json({ error: 'not_found' });
   });
