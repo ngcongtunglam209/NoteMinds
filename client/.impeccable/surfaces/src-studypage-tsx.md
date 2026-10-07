@@ -39,3 +39,6 @@ FINISH: unreviewed and undocumented is unfinished; this build ends with the fini
 
 ## Approved comp
 .impeccable/mocks/study-a-strip.png, combined with: purple hand underline on key terms in the summary body (from study-b-tabs.png) and text status labels inside the step cells such as "Đang tạo" (from study-c-contents.png). Not to literalize: the comp text is sample content; the 4 bullets are real summary output at build time.
+
+## Type decision
+font-match ranked Averia Libre (heading, 6-glyph sample) and Biryani (body). Both rejected on product truth: Biryani has no Vietnamese subset, Averia Libre does not resemble the comp and the comp text is model-rendered, not a real face. Chosen by constraint: Be Vietnam Pro (UI and body, full Vietnamese) at the measured cap heights; Patrick Hand (Vietnamese-capable) only for red-pen marks. Measured caps at 1080px comp width: heading 51px, body 36.3px, title 35.7px, pen text 37px (divide by 2.77 for 390px CSS).

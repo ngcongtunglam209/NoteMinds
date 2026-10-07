@@ -1,0 +1,130 @@
+/* Vở ô li: a Vietnamese school notebook used as a typographic system.
+   Ink is for the learner, red ballpoint only for review, the ô li ruling is the baseline grid. */
+
+:root {
+  --paper: #f8f8f7;
+  --ink: #120f5a;
+  --ink-soft: #3a3778; /* secondary text, still AA on paper */
+  --cta: #282782;
+  --on-cta: #ffffff;
+  --rule: #c4c3e4; /* strong ô li line */
+  --rule-faint: #f0f0f8; /* the three thin lines between */
+  --rule-grid: #f4f4f9; /* faint verticals of the squares */
+  --margin: #ec8a85; /* red margin rule */
+  --pen: #e0281f; /* red ballpoint: due counts, review marks, lapses */
+
+  --row: 26.6px; /* one ô li row = one line of body text */
+  --gutter: 23px;
+  --font-ui: 'Archivo Variable', system-ui, sans-serif;
+  --narrow: 84%; /* Archivo width axis: long reading text is set narrow, like the comp */
+  --font-pen: 'Patrick Hand', cursive;
+
+  --label-frame: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='60' height='60' viewBox='0 0 60 60'%3E%3Cg fill='none' stroke='%23120f5a'%3E%3Cpath stroke-width='1.25' d='M9 1H51A8 8 0 0 0 59 9V51A8 8 0 0 0 51 59H9A8 8 0 0 0 1 51V9A8 8 0 0 0 9 1Z'/%3E%3Cpath stroke-width='0.8' d='M10 5H50A5 5 0 0 0 55 10V50A5 5 0 0 0 50 55H10A5 5 0 0 0 5 50V10A5 5 0 0 0 10 5Z'/%3E%3C/g%3E%3C/svg%3E");
+}
+
+/* Dark: provisional "notebook at night" until the light world is reviewed (open decision). */
+:root[data-theme='dark'] {
+  --paper: #15132b;
+  --ink: #ecebf8;
+  --ink-soft: #c3c1e4;
+  --cta: #c9c6ff;
+  --on-cta: #15132b;
+  --rule: #4a4790;
+  --rule-faint: #24224a;
+  --rule-grid: #1d1b3c;
+  --margin: #b4524e;
+  --pen: #ff5a4f;
+  --label-frame: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='60' height='60' viewBox='0 0 60 60'%3E%3Cg fill='none' stroke='%23ecebf8'%3E%3Cpath stroke-width='1.25' d='M9 1H51A8 8 0 0 0 59 9V51A8 8 0 0 0 51 59H9A8 8 0 0 0 1 51V9A8 8 0 0 0 9 1Z'/%3E%3Cpath stroke-width='0.8' d='M10 5H50A5 5 0 0 0 55 10V50A5 5 0 0 0 50 55H10A5 5 0 0 0 5 50V10A5 5 0 0 0 10 5Z'/%3E%3C/g%3E%3C/svg%3E");
+}
+
+html { background: var(--paper); color: var(--ink); font-family: var(--font-ui); caret-color: var(--pen); scrollbar-color: var(--rule) transparent; }
+::selection { background: color-mix(in srgb, var(--pen) 22%, transparent); color: var(--ink); }
+:focus-visible { outline: 2px solid var(--cta); outline-offset: 2px; border-radius: 4px; }
+a { color: inherit; text-underline-offset: 0.2em; }
+.visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+
+/* ── Study screen ── */
+
+.study { min-height: 100dvh; display: flex; flex-direction: column; }
+
+.study-top { display: flex; justify-content: space-between; align-items: flex-start; height: 52px; padding: 9px 9px 0 0; }
+.icon-btn { display: grid; place-items: center; width: 44px; height: 44px; border: 0; background: none; color: var(--ink); cursor: pointer; border-radius: 50%; }
+.icon-btn:hover { background: var(--rule-faint); }
+
+/* nhãn vở: double-ruled label with scooped corners, drawn by the 9-slice SVG above */
+.label {
+  margin: 0 var(--gutter);
+  padding: 7px 14px 0;
+  border: 14px solid transparent;
+  border-image: var(--label-frame) 14 / 14px stretch;
+  background: var(--paper);
+}
+.label h1 { font-size: 17.4px; font-stretch: var(--narrow); font-weight: 500; line-height: 1.35; letter-spacing: -0.005em; overflow-wrap: anywhere; }
+.label p { margin-top: 2px; font-size: 12.5px; color: var(--ink); }
+
+/* 4 steps as one strip of equal cells, status mark in a fixed spot */
+.steps { display: grid; grid-template-columns: repeat(4, 1fr); margin-top: 9px; border-block: 1px solid var(--rule); }
+.step {
+  display: flex; flex-direction: column; align-items: center; gap: 1px;
+  padding: 4px 2px 6px; height: 74px;
+  border: 0; background: none; color: var(--ink); font-size: 14.5px; line-height: 1.2; cursor: pointer;
+}
+.step + .step { border-left: 1px solid var(--rule); }
+.step:hover { background: color-mix(in srgb, var(--rule-faint) 60%, transparent); }
+.step-label { position: relative; padding-bottom: 6px; }
+.step[aria-selected='true'] .step-label::after {
+  content: ''; position: absolute; left: -20%; right: -20%; bottom: -5px; height: 18px;
+  background: url('../assets/plates/pen-underline.png') center / 100% 100% no-repeat;
+}
+.step-mark { margin-top: 2px; }
+.step-status { font-size: 12px; color: var(--ink-soft); }
+
+/* The page: ô li ruling (strong line closes each row, three faint lines inside, faint verticals), red margin */
+.page {
+  position: relative; flex: 1;
+  padding: 0 46px 112px 51px;
+  background-color: var(--paper);
+  background-image:
+    linear-gradient(to bottom, transparent calc(var(--row) - 1px), var(--rule) calc(var(--row) - 1px)),
+    linear-gradient(to bottom, transparent calc(var(--row) / 4 - 1px), var(--rule-faint) calc(var(--row) / 4 - 1px)),
+    linear-gradient(to right, transparent calc(var(--row) - 1px), var(--rule-grid) calc(var(--row) - 1px));
+  background-size: 100% var(--row), 100% calc(var(--row) / 4), var(--row) 100%;
+  background-position: 0 -7px; /* puts each row's strong line on the text baseline */
+}
+.page::before { /* double red margin rule */
+  content: ''; position: absolute; top: 0; bottom: 0; left: 27px; width: 6px;
+  border-inline: 1px solid var(--margin);
+}
+
+.due {
+  position: relative; display: flex; align-items: center; justify-content: center; width: fit-content; min-width: 150px; height: 51px; margin: 2px -40px 0 auto; padding: 0 18px 2px;
+  background: radial-gradient(closest-side, var(--paper) 80%, transparent); /* the pen mark sits on a clean patch of page */
+  font-family: var(--font-pen); font-size: 19.5px; line-height: 1; color: var(--pen); text-decoration: none;
+}
+.due::before { content: ''; position: absolute; inset: 4px 2px 3px 4px; background: url('../assets/plates/due-circle.png') center / 100% 100% no-repeat; }
+
+.page h2 { margin-top: -6px; font-size: 25px; font-weight: 700; line-height: calc(var(--row) * 2); letter-spacing: -0.01em; }
+
+/* Summary prose sits on the ruling: line-height is exactly one row */
+.prose { font-size: 17.7px; font-stretch: var(--narrow); letter-spacing: 0.012em; word-spacing: 0.06em; line-height: var(--row); max-width: 65ch; text-align: justify; hyphens: none; }
+.prose p, .prose ul, .prose ol { margin-bottom: var(--row); }
+.prose ul, .prose ol { padding-left: 27px; }
+.prose li { margin-bottom: 8px; padding-left: 2px; }
+.prose li::marker { font-size: 0.9em; }
+.prose h3 { font-size: 19px; font-weight: 600; line-height: calc(var(--row) * 1.5); }
+.prose strong { font-weight: 500; text-decoration: underline 2px color-mix(in srgb, var(--ink) 70%, transparent); text-underline-offset: 4px; }
+
+/* Thumb zone: one primary action plus the document chat */
+.thumb {
+  position: fixed; inset: auto 0 0 0; display: grid; grid-template-columns: 1fr 46px; gap: 12px; align-items: start;
+  height: calc(80px + env(safe-area-inset-bottom)); padding: 5px 15px env(safe-area-inset-bottom) 12px; background: var(--paper);
+}
+.cta {
+  margin-top: 4px; display: flex; align-items: center; justify-content: center; gap: 7px; height: 49px;
+  border: 0; border-radius: 5px; background: var(--cta); color: var(--on-cta);
+  font-size: 17px; font-weight: 600; font-stretch: 94%; cursor: pointer;
+}
+.cta:hover { background: color-mix(in srgb, var(--cta) 88%, var(--paper)); }
+.cta:disabled { opacity: 0.55; cursor: progress; }
+.chat-btn { display: grid; justify-items: center; gap: 2px; border: 0; background: none; color: var(--ink); font-size: 12px; cursor: pointer; }
+.chat-btn span:first-child { display: grid; place-items: center; width: 44px; height: 44px; border: 1.5px solid var(--ink); border-radius: 50%; }

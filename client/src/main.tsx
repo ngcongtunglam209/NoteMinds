@@ -5,7 +5,10 @@ import { App } from './App.tsx';
 import { AuthProvider } from './auth.tsx';
 import { I18nProvider } from './i18n.tsx';
 import { ThemeProvider } from './theme.tsx';
+import '@fontsource-variable/archivo/standard.css';
+import '@fontsource/patrick-hand/400.css';
 import './reset.css';
+import './styles.css';
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
