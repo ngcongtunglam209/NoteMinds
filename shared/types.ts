@@ -30,7 +30,12 @@ export type ErrorCode =
   | 'audio_unsupported'
   | 'file_too_large'
   | 'extraction_failed'
-  | 'no_text';
+  | 'no_text'
+  | 'document_not_ready'
+  | 'document_too_long'
+  | 'ai_unavailable'
+  | 'ai_bad_output'
+  | 'chat_quota_exceeded';
 
 export interface ApiError {
   error: ErrorCode;

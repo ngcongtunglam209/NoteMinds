@@ -138,12 +138,16 @@ const loginSchema = z.object({
   turnstileToken: z.string().optional(),
 });
 
+/** express-rate-limit with the API's error body; a pass-through when disabled (tests). */
+export function limiter(enabled: boolean, opts: Partial<RateLimitOptions>): RequestHandler {
+  return enabled
+    ? rateLimit({ standardHeaders: 'draft-8', legacyHeaders: false, message: { error: 'rate_limited' }, ...opts })
+    : (_req, _res, next) => next();
+}
+
 export function authRouter(db: DB, { rateLimits = true } = {}): Router {
   const router = Router();
-  const limit = (opts: Partial<RateLimitOptions>): RequestHandler =>
-    rateLimits
-      ? rateLimit({ standardHeaders: 'draft-8', legacyHeaders: false, message: { error: 'rate_limited' }, ...opts })
-      : (_req, _res, next) => next();
+  const limit = (opts: Partial<RateLimitOptions>) => limiter(rateLimits, opts);
 
   const insertUser = db.prepare(
     'INSERT INTO users (username, email, password_hash, display_name) VALUES (?, ?, ?, ?) RETURNING *');
