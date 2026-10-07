@@ -98,7 +98,7 @@ a { color: inherit; text-underline-offset: 0.2em; }
 
 .due {
   position: relative; display: flex; align-items: center; justify-content: center; width: fit-content; min-width: 150px; height: 51px; margin: 2px -40px 0 auto; padding: 0 18px 2px;
-  background: radial-gradient(closest-side, var(--paper) 80%, transparent); /* the pen mark sits on a clean patch of page */
+  background: var(--paper); /* the red note is written on a clean patch of page, over the ruling */
   font-family: var(--font-pen); font-size: 19.5px; line-height: 1; color: var(--pen); text-decoration: none;
 }
 .due::before { content: ''; position: absolute; inset: 4px 2px 3px 4px; background: url('../assets/plates/due-circle.png') center / 100% 100% no-repeat; }
@@ -120,9 +120,9 @@ a { color: inherit; text-underline-offset: 0.2em; }
   height: calc(80px + env(safe-area-inset-bottom)); padding: 5px 15px env(safe-area-inset-bottom) 12px; background: var(--paper);
 }
 .cta {
-  margin-top: 4px; display: flex; align-items: center; justify-content: center; gap: 7px; height: 49px;
+  margin-top: 6px; display: flex; align-items: center; justify-content: center; gap: 7px; height: 44px;
   border: 0; border-radius: 5px; background: var(--cta); color: var(--on-cta);
-  font-size: 17px; font-weight: 600; font-stretch: 94%; cursor: pointer;
+  font-size: 17px; font-weight: 600; letter-spacing: 0.01em; cursor: pointer;
 }
 .cta:hover { background: color-mix(in srgb, var(--cta) 88%, var(--paper)); }
 .cta:disabled { opacity: 0.55; cursor: progress; }
