@@ -34,6 +34,12 @@
   "error.rate_limited": "Bạn thử quá nhiều lần, vui lòng đợi một lát rồi thử lại.",
   "error.not_found": "Không tìm thấy nội dung bạn cần.",
   "error.internal": "Đã xảy ra lỗi, vui lòng thử lại sau.",
+  "error.quota_exceeded": "Bạn đã dùng hết lượt tải tài liệu hôm nay.",
+  "error.unsupported_file": "Định dạng này chưa được hỗ trợ. Hãy dùng PDF, DOCX, PPTX, XLSX, TXT, MD hoặc ảnh.",
+  "error.audio_unsupported": "Hiện chưa hỗ trợ file ghi âm.",
+  "error.file_too_large": "File quá lớn, tối đa 50 MB.",
+  "error.extraction_failed": "Không đọc được nội dung file này. Hãy thử file khác.",
+  "error.no_text": "File không có chữ đọc được (có thể là bản scan). Hãy thử chụp ảnh từng trang.",
 
   "library.title": "Thư viện",
   "doc.title": "Tài liệu"

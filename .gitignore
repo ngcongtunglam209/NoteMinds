@@ -93,3 +93,6 @@ pids/
 
 # Docker build context
 .docker/
+
+# Claude Code agent worktrees
+.claude/worktrees/

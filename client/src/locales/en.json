@@ -34,6 +34,12 @@
   "error.rate_limited": "Too many attempts. Please wait a moment and try again.",
   "error.not_found": "We couldn't find what you were looking for.",
   "error.internal": "Something went wrong. Please try again later.",
+  "error.quota_exceeded": "You've used all of today's uploads.",
+  "error.unsupported_file": "This format isn't supported yet. Use PDF, DOCX, PPTX, XLSX, TXT, MD or an image.",
+  "error.audio_unsupported": "Audio files aren't supported yet.",
+  "error.file_too_large": "File is too large (50 MB max).",
+  "error.extraction_failed": "We couldn't read this file. Try another one.",
+  "error.no_text": "This file has no readable text (it may be a scan). Try photos of the pages instead.",
 
   "library.title": "Library",
   "doc.title": "Document"
