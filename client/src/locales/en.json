@@ -40,6 +40,11 @@
   "error.file_too_large": "File is too large (50 MB max).",
   "error.extraction_failed": "We couldn't read this file. Try another one.",
   "error.no_text": "This file has no readable text (it may be a scan). Try photos of the pages instead.",
+  "error.document_not_ready": "This document is still being processed. Please wait a little longer.",
+  "error.document_too_long": "This document is too long for the AI. Split it into parts and upload each one.",
+  "error.ai_unavailable": "The AI is busy or temporarily unavailable. Please try again in a few minutes.",
+  "error.ai_bad_output": "The AI's answer came back malformed. Please try generating it again.",
+  "error.chat_quota_exceeded": "You've used all of today's AI questions.",
 
   "library.title": "Library",
   "doc.title": "Document"

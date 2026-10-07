@@ -40,6 +40,11 @@
   "error.file_too_large": "File quá lớn, tối đa 50 MB.",
   "error.extraction_failed": "Không đọc được nội dung file này. Hãy thử file khác.",
   "error.no_text": "File không có chữ đọc được (có thể là bản scan). Hãy thử chụp ảnh từng trang.",
+  "error.document_not_ready": "Tài liệu vẫn đang được xử lý, vui lòng đợi thêm chút nữa.",
+  "error.document_too_long": "Tài liệu quá dài để AI xử lý. Hãy chia nhỏ rồi tải lên từng phần.",
+  "error.ai_unavailable": "AI đang bận hoặc tạm thời gián đoạn, vui lòng thử lại sau ít phút.",
+  "error.ai_bad_output": "AI trả về kết quả chưa đúng, vui lòng thử tạo lại.",
+  "error.chat_quota_exceeded": "Bạn đã dùng hết lượt hỏi AI hôm nay.",
 
   "library.title": "Thư viện",
   "doc.title": "Tài liệu"

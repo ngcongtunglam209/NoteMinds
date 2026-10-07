@@ -8,6 +8,13 @@ import { createApp } from './app.ts';
 import { openDb, type DB } from './db.ts';
 import { MAX_UPLOAD_BYTES } from './documents.ts';
 import { detectFormat, ocr } from './extract.ts';
+import { AiError, type Llm } from './ai/llm.ts';
+
+// Uploads start a summary; never let these tests reach a real model.
+const offline: Llm = {
+  complete: () => Promise.reject(new AiError('ai_unavailable', 'offline')),
+  stream: () => { throw new AiError('ai_unavailable', 'offline'); },
+};
 
 let db: DB;
 let server: Server;
@@ -26,7 +33,7 @@ async function register(username: string) {
 
 before(async () => {
   db = openDb(':memory:');
-  server = createApp(db, { rateLimits: false }).listen(0);
+  server = createApp(db, { rateLimits: false, llm: offline }).listen(0);
   base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   alice = await register('alice');
   bob = await register('bob');

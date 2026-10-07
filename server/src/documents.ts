@@ -41,7 +41,7 @@ const SUMMARY_COLUMNS = 'id, file_name, mime_type, size_bytes, status, error, ch
 // Control characters stripped; the name is display data only, never part of a path.
 const cleanFileName = (name: string) => name.normalize('NFC').replace(/[\u0000-\u001f\u007f]/g, '').slice(0, 255) || 'document';
 
-const parseId = (raw: unknown) => (typeof raw === 'string' && /^[1-9]\d{0,15}$/.test(raw) ? Number(raw) : null);
+export const parseId = (raw: unknown) => (typeof raw === 'string' && /^[1-9]\d{0,15}$/.test(raw) ? Number(raw) : null);
 
 // Files are held in memory only for extraction; nothing is written to disk.
 // ponytail: up to 50MB per concurrent upload in RAM; switch to disk storage if memory gets tight
@@ -59,7 +59,15 @@ const receiveFile: RequestHandler = (req, res, next) => {
   });
 };
 
-export function documentsRouter(db: DB): Router {
+/** Daily quotas reset at UTC midnight (legacy behavior). */
+export function nextUtcMidnight(): string {
+  const resetAt = new Date();
+  resetAt.setUTCHours(24, 0, 0, 0);
+  return resetAt.toISOString();
+}
+
+/** onReady runs after a document's text is stored (status 'ready'), e.g. to start its summary. */
+export function documentsRouter(db: DB, { onReady = (_id: number) => {} } = {}): Router {
   const router = Router();
   router.use(requireAuth);
 
@@ -74,14 +82,11 @@ export function documentsRouter(db: DB): Router {
   const finishDoc = db.prepare(
     "UPDATE documents SET status = ?, error = ?, text = ?, char_count = ?, updated_at = datetime('now') WHERE id = ?");
 
-  // Quota days are UTC days (legacy behavior).
   function quotaExceeded(user: User): QuotaExceededError | null {
     const limit = DAILY_UPLOADS[user.plan] ?? DAILY_UPLOADS.free!;
     const { n } = countToday.get(user.id) as { n: number };
     if (limit === -1 || n < limit) return null;
-    const resetAt = new Date();
-    resetAt.setUTCHours(24, 0, 0, 0);
-    return { error: 'quota_exceeded', resetAt: resetAt.toISOString() };
+    return { error: 'quota_exceeded', resetAt: nextUtcMidnight() };
   }
 
   // Checked before reading the body (cheap rejection) and again right before recording the upload,
@@ -103,6 +108,7 @@ export function documentsRouter(db: DB): Router {
       error = 'extraction_failed';
     }
     finishDoc.run(error ? 'failed' : 'ready', error, text, text.length, id);
+    if (!error) onReady(id);
   }
 
   router.post('/', checkQuota, receiveFile, (req, res) => {

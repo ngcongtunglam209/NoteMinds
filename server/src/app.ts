@@ -1,10 +1,14 @@
 import express, { type ErrorRequestHandler } from 'express';
 import { authRouter, loadUser } from './auth.ts';
 import { documentsRouter } from './documents.ts';
+import { studyRouter } from './study.ts';
+import { createLlm, type Llm } from './ai/llm.ts';
 import type { DB } from './db.ts';
 
-export function createApp(db: DB, { rateLimits = true } = {}) {
+/** `llm` is injectable so tests run against a fake model. */
+export function createApp(db: DB, { rateLimits = true, llm = createLlm() as Llm } = {}) {
   const app = express();
+  const study = studyRouter(db, llm, { rateLimits });
   app.disable('x-powered-by');
   if (process.env.TRUST_PROXY) app.set('trust proxy', Number(process.env.TRUST_PROXY));
 
@@ -15,7 +19,9 @@ export function createApp(db: DB, { rateLimits = true } = {}) {
     res.json({ ok: true });
   });
   app.use('/api/auth', authRouter(db, { rateLimits }));
-  app.use('/api/documents', documentsRouter(db));
+  // Zero-prompt: the summary starts as soon as a document's text is ready; other kinds wait for a request.
+  app.use('/api/documents', documentsRouter(db, { onReady: (id) => study.generate(id, 'summary') }));
+  app.use('/api', study.router);
   app.use('/api', (_req, res) => {
     res.status(404).json({ error: 'not_found' });
   });

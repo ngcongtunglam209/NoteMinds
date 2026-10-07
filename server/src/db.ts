@@ -23,14 +23,26 @@ function migrate(db: DB) {
   for (const file of files) {
     const version = Number.parseInt(file, 10);
     if (version <= current) continue;
-    db.exec('BEGIN');
     try {
-      db.exec(readFileSync(join(MIGRATIONS_DIR, file), 'utf8'));
-      db.exec(`PRAGMA user_version = ${version}`);
-      db.exec('COMMIT');
+      transaction(db, () => {
+        db.exec(readFileSync(join(MIGRATIONS_DIR, file), 'utf8'));
+        db.exec(`PRAGMA user_version = ${version}`);
+      });
     } catch (err) {
-      db.exec('ROLLBACK');
       throw new Error(`Migration ${file} failed`, { cause: err });
     }
+  }
+}
+
+/** Runs fn in a transaction. fn must be synchronous: an await inside would let other writes in. */
+export function transaction<T>(db: DB, fn: () => T): T {
+  db.exec('BEGIN');
+  try {
+    const result = fn();
+    db.exec('COMMIT');
+    return result;
+  } catch (err) {
+    db.exec('ROLLBACK');
+    throw err;
   }
 }
