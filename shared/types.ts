@@ -24,7 +24,13 @@ export type ErrorCode =
   | 'unauthorized'
   | 'rate_limited'
   | 'not_found'
-  | 'internal';
+  | 'internal'
+  | 'quota_exceeded'
+  | 'unsupported_file'
+  | 'audio_unsupported'
+  | 'file_too_large'
+  | 'extraction_failed'
+  | 'no_text';
 
 export interface ApiError {
   error: ErrorCode;
