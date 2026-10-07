@@ -11,7 +11,7 @@
   --rule-faint: #f0f0f8; /* the three thin lines between */
   --rule-grid: #f4f4f9; /* faint verticals of the squares */
   --margin: #ec8a85; /* red margin rule */
-  --pen: #e0281f; /* red ballpoint: due counts, review marks, lapses */
+  --pen: #cc2219; /* red ballpoint: due counts, review marks, lapses (5.2:1 on paper; plates keep the brighter #E0281F stroke) */
 
   --row: 26.6px; /* one ô li row = one line of body text */
   --ruling:
@@ -143,7 +143,7 @@ a { color: inherit; text-underline-offset: 0.2em; }
 .empty-note { font-size: 16px; line-height: var(--row); color: var(--ink-soft); }
 .pen-note { font-family: var(--font-pen); font-size: 20px; line-height: var(--row); color: var(--pen); }
 .state-note { display: grid; justify-items: start; gap: 4px; padding-top: var(--row); }
-.writing { font-family: var(--font-pen); font-size: 21px; line-height: var(--row); color: var(--ink); }
+.writing { font-size: 17.7px; font-style: italic; line-height: var(--row); color: var(--ink); } /* the hand is reserved for red-pen marks */
 .writing::after { content: ''; display: inline-block; width: 0.5em; height: 2px; margin-left: 4px; vertical-align: 0.25em; background: currentColor; animation: nib 1.1s ease-in-out infinite; }
 @keyframes nib { 50% { transform: scaleX(3); transform-origin: left; } }
 
